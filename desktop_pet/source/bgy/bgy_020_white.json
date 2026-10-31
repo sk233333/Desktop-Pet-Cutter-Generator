@@ -1,0 +1,21 @@
+{
+  "sku": "bgy",
+  "stem": "bgy_020_white",
+  "src": "/home/wxx/my_project/Little-figurine-rating/Punctuation_selection_of_images/image_assist_ans/bgy_020_white.png",
+  "mask_src": "derived(非白)",
+  "orig_w": 792,
+  "orig_h": 912,
+  "obj_bbox_orig": [
+    27,
+    31,
+    745,
+    838
+  ],
+  "obj_w_px": 719,
+  "obj_h_px": 808,
+  "mm_per_px_orig": 0.054376106913444404,
+  "canonical_size": 1026,
+  "mm_per_px_canon": 0.04647938183537109,
+  "object_height_mm": 45.0,
+  "aligned": true
+}

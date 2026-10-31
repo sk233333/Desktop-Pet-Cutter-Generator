@@ -39,10 +39,15 @@ STEP 3 修结果 : 结果窗口按键
                  a      补点迭代精修
                  ENTER  保存并进入下一张
                  n      跳过这张       p 回到上一张       q 退出
+
+只框选眼睛（不加载 SAM，供桌宠眨眼定位）：
+    python3 image_assist.py --eyes-only --image-dir ../desktop_pet/source/bgy
+    写回同目录 <stem>_eyes.json（坐标为这张图自身的像素坐标）
 """
 
 import argparse
 import glob
+import json
 import os
 import sys
 
@@ -58,9 +63,6 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
-
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -422,6 +424,113 @@ def review(image, box, masks, scores, stem, prefix,
 
 
 # ------------------------------------------------------------------
+# 眼睛框选（桌宠眨眼定位用）
+# ------------------------------------------------------------------
+def select_eyes(image, prefix=""):
+    """框选两只眼睛：左键点对角、每只眼 2 点；回车保存，ESC 跳过。"""
+    boxes, pending = [], []
+    cancelled = [True]
+    fig, ax = plt.subplots(figsize=(10, 12))
+
+    def reset_view(tip=""):
+        ax.clear()
+        ax.imshow(image)
+        ax.axis("off")
+        for k, (x1, y1, x2, y2) in enumerate(boxes, 1):
+            ax.add_patch(Rectangle((x1, y1), x2 - x1, y2 - y1,
+                                   linewidth=2.0, edgecolor="lime", facecolor="none"))
+            ax.text(x1, max(4, y1 - 8), f"眼{k}", color="lime",
+                    fontsize=12, weight="bold")
+        for px, py in pending:
+            ax.plot(px, py, "o", color="yellow", markersize=8)
+        ax.set_title(
+            f"{prefix}框选眼睛：左键点每只眼的两个对角 -> 回车保存\n"
+            f"r = 重画    u = 撤销上一个点    ESC = 跳过这张"
+            + (f"\n{tip}" if tip else ""), fontsize=11)
+
+    def on_click(e):
+        if e.inaxes != ax or e.button != 1 or len(boxes) >= 2:
+            return
+        pending.append([int(e.xdata), int(e.ydata)])
+        if len(pending) == 2:
+            (ax1, ay1), (ax2, ay2) = pending
+            boxes.append((min(ax1, ax2), min(ay1, ay2),
+                          max(ax1, ax2), max(ay1, ay2)))
+            pending.clear()
+            print(f"    眼{len(boxes)} 框 [{boxes[-1]}]")
+        print("    再画另一只眼，或回车保存" if len(boxes) == 1
+              else "    回车保存" if boxes else "    继续点第二个角")
+        reset_view()
+        fig.canvas.draw()
+
+    def on_key(e):
+        k = (e.key or "").lower()
+        if k == "enter" and boxes:
+            cancelled[0] = False
+            plt.close()
+        elif k == "r":
+            boxes.clear()
+            pending.clear()
+            reset_view("已清空，请重新框")
+            fig.canvas.draw()
+        elif k == "u":
+            if pending:
+                pending.pop()
+            elif boxes:
+                boxes.pop()
+            reset_view("已撤销")
+            fig.canvas.draw()
+        elif k == "escape":
+            plt.close()
+
+    fig.canvas.mpl_connect("button_press_event", on_click)
+    fig.canvas.mpl_connect("key_press_event", on_key)
+    plt.tight_layout()
+    plt.show()
+
+    return [] if cancelled[0] else [{"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+                                    for x1, y1, x2, y2 in boxes]
+
+
+def save_eyes_json(image_path, image, boxes):
+    """眼睛坐标写在图片同目录，供 cutout_to_pet.py 读取。"""
+    stem = os.path.splitext(os.path.basename(image_path))[0]
+    out = os.path.join(os.path.dirname(image_path), f"{stem}_eyes.json")
+    data = {"stem": stem,
+            "image_size": [int(image.shape[1]), int(image.shape[0])],
+            "eyes": boxes}
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return out
+
+
+def run_eyes_only(args):
+    files = collect_images(args.image_dir, only=args.name)
+    if args.skip_done:
+        files = [f for f in files
+                 if not os.path.exists(os.path.splitext(f)[0] + "_eyes.json")]
+    if not files:
+        print(f"没有待标注图片（目录: {args.image_dir}）")
+        return
+    print(f"[眼睛标注] {len(files)} 张 -> 写回同目录 <stem>_eyes.json")
+    print("=" * 60)
+    done = 0
+    for i, path in enumerate(files, 1):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        prefix = f"[{i}/{len(files)}] {stem}  "
+        print(f"\n[{i}/{len(files)}] {stem}")
+        image = np.array(Image.open(path).convert("RGB"))
+        boxes = select_eyes(image, prefix=prefix)
+        if not boxes:
+            print("    → 跳过")
+            continue
+        out = save_eyes_json(path, image, boxes)
+        done += 1
+        print(f"    ✓ 已保存 {os.path.basename(out)}（{len(boxes)} 只眼）")
+    print(f"\n[完成] 共标注 {done} 张")
+
+
+# ------------------------------------------------------------------
 def collect_images(image_dir, only=None, skip_done=False, check_dir=None):
     files = []
     for pat in IMG_EXT:
@@ -438,6 +547,8 @@ def collect_images(image_dir, only=None, skip_done=False, check_dir=None):
 
 
 def load_model(checkpoint, device):
+    from sam2.build_sam import build_sam2
+    from sam2.sam2_image_predictor import SAM2ImagePredictor
     if not os.path.exists(checkpoint):
         raise FileNotFoundError(
             f"\n找不到权重: {checkpoint}\n"
@@ -536,7 +647,18 @@ def main():
     ap.add_argument("--skip-done", action="store_true", help="跳过已标注的")
     ap.add_argument("--save-mask", action="store_true",
                     help="额外保存灰度 mask（训练时才需要）")
+    ap.add_argument("--eyes-only", action="store_true",
+                    help="只框选眼睛（不加载 SAM），坐标写回 <image-dir>/<stem>_eyes.json")
     args = ap.parse_args()
+
+    if args.eyes_only:
+        if args.image_dir is None:
+            if args.type is None:
+                args.type = choose_type()
+            args.image_dir = TYPE_DIRS[args.type][0]
+        print(f"[眼睛标注] 目录 {args.image_dir}")
+        run_eyes_only(args)
+        return
 
     if args.type is None:
         args.type = choose_type()
