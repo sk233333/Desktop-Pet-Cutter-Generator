@@ -1,0 +1,31 @@
+{
+  "moods": {
+    "calm": {
+      "weights": { "blink": 0.45, "glance": 0.25, "bubble": 0.15, "half": 0.15 },
+      "idle_ms": [3500, 8000]
+    },
+    "curious": {
+      "weights": { "glance": 0.45, "wink_r": 0.2, "bubble_q": 0.2, "perk": 0.15 },
+      "idle_ms": [2500, 6000]
+    },
+    "sleepy": {
+      "weights": { "slow_blink": 0.5, "zzz": 0.3, "yawn": 0.2 },
+      "idle_ms": [5000, 11000]
+    }
+  },
+  "effects": {
+    "blink":      { "expr": "blink",    "hold_ms": 180,  "bubble": "" },
+    "slow_blink": { "expr": "blink",    "hold_ms": 420,  "bubble": "" },
+    "half":       { "expr": "half",     "hold_ms": 1500, "bubble": "" },
+    "wink_r":     { "expr": "wink_r",   "hold_ms": 900,  "bubble": "" },
+    "perk":       { "expr": "surprise", "hold_ms": 700,  "bubble": "!" },
+    "yawn":       { "expr": "surprise", "hold_ms": 1200, "bubble": "…" },
+    "glance":     { "expr": "normal",   "hold_ms": 700,  "bubble": "",
+                    "gaze": { "gx": -0.7, "gy": 0.15 } },
+    "glance_r":   { "expr": "normal",   "hold_ms": 700,  "bubble": "",
+                    "gaze": { "gx": 0.7, "gy": 0.1 } },
+    "bubble":     { "expr": "normal",   "hold_ms": 800,  "bubble": "♪" },
+    "bubble_q":   { "expr": "normal",   "hold_ms": 900,  "bubble": "?" },
+    "zzz":        { "expr": "half",     "hold_ms": 1600, "bubble": "Zzz" }
+  }
+}

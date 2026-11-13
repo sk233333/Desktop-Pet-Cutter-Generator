@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://desktop-pet.local/manifest.schema.json",
+  "title": "桌宠 manifest v2",
+  "type": "object",
+  "required": ["schema_version", "items"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "schema": {"type": "string", "description": "旧的产物标识，仅兼容保留"},
+    "sku": {"type": "string"},
+    "generated_at": {"type": "string"},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/item"}
+    }
+  },
+  "$defs": {
+    "part": {
+      "type": "object",
+      "required": ["id", "group", "channel"],
+      "properties": {
+        "id": {"type": "string", "description": "稳定唯一标识，不随绘制顺序变化"},
+        "eye_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "指回原始 eyes 下标；过滤只改哪些索引参与，不改索引本身"
+        },
+        "group": {
+          "oneOf": [{"type": "string"}, {"type": "null"}],
+          "description": "分组 id（g{n}，整数组号由 read_manifest 归一化）；null = 不参与眨眼/视线/表情（装饰件）"
+        },
+        "eye_level": {"enum": ["L2", "L1", "L0", "auto"]},
+        "mask": {
+          "type": ["string", "null"],
+          "description": "眼眶 mask 文件；文件不存在时为 null（迁移越界告警），禁止复用最后一个文件"
+        },
+        "channel": {
+          "enum": ["R", "G"],
+          "description": "R/G 对应一只眼；B 恒为高光，不对应任何 eye part"
+        },
+        "poly": {"type": "array", "description": "可选：多边形眼眶（原图坐标）"},
+        "ellipse": {"type": "object", "description": "可选：v1 椭圆外接框，旧渲染路径兼容用"}
+      }
+    },
+    "timeline": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean", "default": true},
+        "cycle": {"type": "number", "exclusiveMinimum": 0, "default": 8.0},
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["group", "t", "hold"],
+            "properties": {
+              "group": {
+                "oneOf": [{"type": "string"}, {"type": "integer"}],
+                "description": "g{n}；兼容旧 int 组号（read_manifest 会归一化）。不允许 null"
+              },
+              "t": {"type": "number", "minimum": 0, "description": "周期内起点（秒）"},
+              "hold": {"type": "number", "exclusiveMinimum": 0, "description": "持续时长（秒）"},
+              "half": {
+                "type": "boolean",
+                "default": false,
+                "description": "true 时前 hold/2 为半闭（ExprBank 遮挡式），默认 false = 整段全闭"
+              },
+              "count": {"type": "integer", "minimum": 1},
+              "levels": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["stem", "parts"],
+      "properties": {
+        "stem": {"type": "string"},
+        "sku": {"type": "string"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "anchor": {
+          "type": "object",
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+        },
+        "display_height_px": {"type": "integer"},
+        "parts": {"type": "array", "items": {"$ref": "#/$defs/part"}},
+        "eye_parts": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "逐素材兜底：给 part id 白名单，只能救回「mask 存在但 group=null」的 part；mask=null 永远不参与通道"
+        },
+        "timeline": {"$ref": "#/$defs/timeline"},
+        "effects": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "array", "items": {"type": "string"}},
+            "mood": {"type": "string"}
+          }
+        },
+        "gaze": {"type": "boolean", "description": "逐素材总开关（关掉仍保留眨眼）"},
+        "eye_domains": {
+          "type": "array",
+          "items": {"type": "integer"},
+          "description": "烘焙时记录的每只眼眶连通域数；≠1 表示标注里混进了装饰件"
+        },
+        "hair": {"type": "array", "items": {"type": "object"}},
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "engine_used": {"enum": ["sam", "grabcut"]},
+            "matting": {"type": "boolean"},
+            "eye_level_source": {"enum": ["auto", "manual"]},
+            "seed": {"type": "integer"}
+          }
+        }
+      }
+    }
+  }
+}
