@@ -60,7 +60,7 @@ python3 desktop_pet/cutout_to_pet.py --sku bgy --no-matting
 ### 一条命令：选图 → 框取 → 选点 → 预览 → 多边形眼眶 → 多边形发缕 → 桌宠
 
 ```bash
-pip install PyQt6
+pip install PyQt6 opencv-python pillow numpy matplotlib
 
 python3 desktop_pet/launch.py                    # 弹文件选择框，随后五步交互
 python3 desktop_pet/launch.py --image photo.jpg
@@ -248,7 +248,7 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 ### 跑起来（桌宠）
 
 ```bash
-pip install PyQt6          # 窗口与动画
+pip install PyQt6 opencv-python pillow numpy   # 窗口与动画；素材需自备，见 docs/ASSETS.md
 
 # 启动桌宠（按 manifest 取素材与显示高度）
 python3 desktop_pet/pet_window.py --sku bgy --stem bgy_001_white
