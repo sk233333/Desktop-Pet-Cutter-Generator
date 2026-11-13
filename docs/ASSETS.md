@@ -16,7 +16,13 @@ desktop_pet/source/custom/<hash>_pet_eyes.json   眼眶标注（椭圆 + 通道�
 desktop_pet/assets/custom/<hash>_pet_*.png       生成产物（_eyes.png 等），已被 ignore
 ```
 
-`desktop_pet/source/custom/` 与 `desktop_pet/assets/` 都在 `.gitignore` 里。仓库内仍保留少量早期跟踪的素材用于历史比对，新增素材不会再被 `git add` 意外带进来。
+`desktop_pet/source/custom/` 与 `desktop_pet/assets/` 都在 `.gitignore` 里，仓库内不含任何素材文件。clone 下来这两个目录**不存在**，需要自己创建：
+
+```bash
+mkdir -p desktop_pet/source/custom desktop_pet/assets/custom
+```
+
+生成的 `_eyes.png` 等产物请自行保管；Git 不会提示，也不会自动加入索引。
 
 ## 自备素材
 
