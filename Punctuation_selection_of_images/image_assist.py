@@ -40,9 +40,11 @@ STEP 3 修结果 : 结果窗口按键
                  ENTER  保存并进入下一张
                  n      跳过这张       p 回到上一张       q 退出
 
-只框选眼睛（不加载 SAM，供桌宠眨眼定位）：
+只标注眼睛（供桌宠视线/眨眼用）：
     python3 image_assist.py --eyes-only --image-dir ../desktop_pet/source/bgy
-    写回同目录 <stem>_eyes.json（坐标为这张图自身的像素坐标）
+    多边形眼眶：左键沿眼眶边界逐点，右键（或回车）闭合；闭合后可继续点下一只，
+    没有未闭合多边形时回车完成。写回同目录 <stem>_eyes.png
+    （R/G=眼眶、B=高光）+ 兼容用的 <stem>_eyes.json（外接框）。
 """
 
 import argparse
@@ -55,6 +57,7 @@ import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -426,61 +429,98 @@ def review(image, box, masks, scores, stem, prefix,
 # ------------------------------------------------------------------
 # 眼睛框选（桌宠眨眼定位用）
 # ------------------------------------------------------------------
-def select_eyes(image, prefix=""):
-    """框选两只眼睛：左键点对角、每只眼 2 点；回车保存，ESC 跳过。"""
-    boxes, pending = [], []
+def select_eye_masks(image, prefix=""):
+    """多边形标注眼眶：左键逐个点顶点沿眼眶边界走一圈，右键（或回车）闭合。
+
+    眼睛这个尺度上 SAM 的点提示很容易把睫毛/眼线/泪痣当成一只眼，改用手工
+    多边形更可控：多边形内部直接填成眼眶 mask，不需要再跑分割模型。
+    r = 重来    u = 撤销    ESC = 跳过这张
+    """
+    masks, pts = [], []
     cancelled = [True]
+    h, w = image.shape[:2]
     fig, ax = plt.subplots(figsize=(10, 12))
+
+    def close_polygon() -> str:
+        if len(pts) < 3:
+            return "至少点 3 个顶点圈住眼眶（右键或回车闭合）"
+        m = np.zeros((h, w), np.uint8)
+        cv2.fillPoly(m, [np.array(pts, np.int32)], 1)
+        masks.append(m.astype(bool))
+        pts.clear()
+        return ""
 
     def reset_view(tip=""):
         ax.clear()
         ax.imshow(image)
         ax.axis("off")
-        for k, (x1, y1, x2, y2) in enumerate(boxes, 1):
-            ax.add_patch(Rectangle((x1, y1), x2 - x1, y2 - y1,
-                                   linewidth=2.0, edgecolor="lime", facecolor="none"))
-            ax.text(x1, max(4, y1 - 8), f"眼{k}", color="lime",
-                    fontsize=12, weight="bold")
-        for px, py in pending:
-            ax.plot(px, py, "o", color="yellow", markersize=8)
+        for k, m in enumerate(masks, 1):
+            ax.contour(m.astype(float), levels=[0.5], colors="lime",
+                       linewidths=1.5)
+            ys, xs = np.where(m)
+            if len(xs):
+                ax.text(xs.min(), max(4, ys.min() - 8), f"眼{k}", color="lime",
+                        fontsize=12, weight="bold")
+        if pts:
+            arr = np.array(pts, dtype=float)
+            if len(pts) >= 2:
+                ax.plot(arr[:, 0], arr[:, 1], "-", color="#39ff14",
+                        linewidth=1.5)
+            if len(pts) >= 3:
+                ax.plot([pts[-1][0], pts[0][0]], [pts[-1][1], pts[0][1]],
+                        "--", color="#39ff14", linewidth=1.2)
+            ax.plot(arr[:, 0], arr[:, 1], "o", color="#39ff14",
+                    markersize=6)
+            for i, (x, y) in enumerate(pts, 1):
+                ax.text(x + 4, y - 6, str(i), color="#39ff14", fontsize=9)
         ax.set_title(
-            f"{prefix}框选眼睛：左键点每只眼的两个对角 -> 回车保存\n"
-            f"r = 重画    u = 撤销上一个点    ESC = 跳过这张"
+            f"{prefix}多边形眼眶：左键 = 加顶点   右键 = 闭合\n"
+            f"回车 = 闭合当前多边形（没有未闭合多边形时 = 完成本张）\n"
+            f"r = 重来    u = 撤销    ESC = 跳过这张"
             + (f"\n{tip}" if tip else ""), fontsize=11)
 
     def on_click(e):
-        if e.inaxes != ax or e.button != 1 or len(boxes) >= 2:
+        if e.inaxes != ax or e.button not in (1, 3):
             return
-        pending.append([int(e.xdata), int(e.ydata)])
-        if len(pending) == 2:
-            (ax1, ay1), (ax2, ay2) = pending
-            boxes.append((min(ax1, ax2), min(ay1, ay2),
-                          max(ax1, ax2), max(ay1, ay2)))
-            pending.clear()
-            print(f"    眼{len(boxes)} 框 [{boxes[-1]}]")
-        print("    再画另一只眼，或回车保存" if len(boxes) == 1
-              else "    回车保存" if boxes else "    继续点第二个角")
-        reset_view()
+        if e.button == 3:
+            tip = close_polygon()
+            if not tip:
+                tip = "已确认，继续点下一只；再按回车完成"
+        else:
+            pts.append([int(e.xdata), int(e.ydata)])
+            tip = ""
+        print(f"    当前 {len(pts)} 个顶点，已确认 {len(masks)} 只眼")
+        reset_view(tip)
         fig.canvas.draw()
 
     def on_key(e):
         k = (e.key or "").lower()
-        if k == "enter" and boxes:
-            cancelled[0] = False
-            plt.close()
+        if k == "enter":
+            if pts:
+                tip = close_polygon() or "已确认，继续点下一只；再按回车完成"
+                reset_view(tip)
+                fig.canvas.draw()
+            elif masks:
+                cancelled[0] = False
+                plt.close()
+            else:
+                reset_view("左键沿眼眶边界点一圈（至少 3 个顶点）")
+                fig.canvas.draw()
         elif k == "r":
-            boxes.clear()
-            pending.clear()
-            reset_view("已清空，请重新框")
+            if pts:
+                pts.clear()
+            else:
+                masks.clear()
+            reset_view("已清空，请重新点")
             fig.canvas.draw()
         elif k == "u":
-            if pending:
-                pending.pop()
-            elif boxes:
-                boxes.pop()
+            if pts:
+                pts.pop()
+            elif masks:
+                masks.pop()
             reset_view("已撤销")
             fig.canvas.draw()
-        elif k == "escape":
+        elif k in ("escape", "q"):
             plt.close()
 
     fig.canvas.mpl_connect("button_press_event", on_click)
@@ -488,12 +528,11 @@ def select_eyes(image, prefix=""):
     plt.tight_layout()
     plt.show()
 
-    return [] if cancelled[0] else [{"x1": x1, "y1": y1, "x2": x2, "y2": y2}
-                                    for x1, y1, x2, y2 in boxes]
+    return [] if cancelled[0] else masks
 
 
 def save_eyes_json(image_path, image, boxes):
-    """眼睛坐标写在图片同目录，供 cutout_to_pet.py 读取。"""
+    """眼睛外接框写在图片同目录，供 cutout_to_pet.py 向后兼容读取。"""
     stem = os.path.splitext(os.path.basename(image_path))[0]
     out = os.path.join(os.path.dirname(image_path), f"{stem}_eyes.json")
     data = {"stem": stem,
@@ -508,25 +547,38 @@ def run_eyes_only(args):
     files = collect_images(args.image_dir, only=args.name)
     if args.skip_done:
         files = [f for f in files
-                 if not os.path.exists(os.path.splitext(f)[0] + "_eyes.json")]
+                 if not os.path.exists(os.path.splitext(f)[0] + "_eyes.json")
+                 and not os.path.exists(os.path.splitext(f)[0] + "_eyes.png")]
     if not files:
         print(f"没有待标注图片（目录: {args.image_dir}）")
         return
-    print(f"[眼睛标注] {len(files)} 张 -> 写回同目录 <stem>_eyes.json")
+    print(f"[眼睛标注] {len(files)} 张 -> 写回同目录 <stem>_eyes.png"
+          f"（R/G=眼眶、B=高光）+ <stem>_eyes.json")
     print("=" * 60)
+
+    from pathlib import Path
+    sys.path.insert(0, os.path.join(os.path.dirname(BASE_DIR), "desktop_pet"))
+    from cutout_to_pet import (boxes_from_eye_masks, eye_highlight_mask,
+                               save_eye_masks)
+
     done = 0
     for i, path in enumerate(files, 1):
         stem = os.path.splitext(os.path.basename(path))[0]
         prefix = f"[{i}/{len(files)}] {stem}  "
         print(f"\n[{i}/{len(files)}] {stem}")
         image = np.array(Image.open(path).convert("RGB"))
-        boxes = select_eyes(image, prefix=prefix)
-        if not boxes:
+        masks = select_eye_masks(image, prefix=prefix)
+        if not masks:
             print("    → 跳过")
             continue
-        out = save_eyes_json(path, image, boxes)
+        out_dir = os.path.dirname(path)
+        for old in glob.glob(os.path.join(out_dir, f"{stem}_eyes*.png")):
+            os.remove(old)
+        hl = eye_highlight_mask(image, masks)
+        names = save_eye_masks(Path(out_dir), stem, masks, hl)
+        save_eyes_json(path, image, boxes_from_eye_masks(masks))
         done += 1
-        print(f"    ✓ 已保存 {os.path.basename(out)}（{len(boxes)} 只眼）")
+        print(f"    ✓ 已保存 {', '.join(names)}（{len(masks)} 只眼）")
     print(f"\n[完成] 共标注 {done} 张")
 
 
@@ -648,7 +700,8 @@ def main():
     ap.add_argument("--save-mask", action="store_true",
                     help="额外保存灰度 mask（训练时才需要）")
     ap.add_argument("--eyes-only", action="store_true",
-                    help="只框选眼睛（不加载 SAM），坐标写回 <image-dir>/<stem>_eyes.json")
+                    help="只标注眼眶：多边形（左键加顶点、右键闭合），"
+                         "写回 <image-dir>/<stem>_eyes.png + _eyes.json")
     args = ap.parse_args()
 
     if args.eyes_only:

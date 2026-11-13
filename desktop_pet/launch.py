@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""一条命令跑通：选图 -> 框取 -> 选点 -> 预览(可返回补点) -> 框眼睛 -> 生成素材 -> 启动桌宠。
+"""一条命令跑通：选图 -> 框取 -> 选点 -> 预览(可返回补点) -> 多边形眼眶 -> 多边形发缕 -> 生成素材 -> 启动桌宠。
 
-四步交互（每步窗口上方都有提示，写清这一步要做什么）：
-  第 1 / 4 步  框取手办   ：拖拽或点两个对角圈住手办，回车确认；r 重框
-  第 2 / 4 步  选点       ：左键=前景(红) 右键=背景(蓝)，回车分割；s = 跳过
-  第 3 / 4 步  预览分割   ：四联预览，回车采用；a 返回补点；ESC 取消
-  第 4 / 4 步  框眼睛     ：依次框左眼、右眼；s = 这只眼不眨眼（都不框就不眨眼）
+五步交互（每步窗口上方都有提示，写清这一步要做什么）：
+  第 1 / 5 步  框取手办   ：拖拽或点两个对角圈住手办，回车确认；r 重框
+  第 2 / 5 步  选点       ：左键=前景(红) 右键=背景(蓝)，回车分割；s = 跳过
+  第 3 / 5 步  预览分割   ：四联预览，回车采用；a 返回补点；ESC 取消
+  第 4 / 5 步  多边形眼眶 ：左键沿眼眶边界加顶点，右键/回车闭合；
+                             闭合后可继续画下一只，没有未闭合多边形时回车完成；s = 跳过
+  第 5 / 5 步  多边形发缕 ：左键沿发缕轮廓加顶点（第一个顶点=发根），右键/回车闭合；
+                             闭合后可继续画下一缕，再按回车完成；s = 跳过
+
+  （--cli 仍是旧的拖框流程：框眼睛、写 _eyes.json，不落 _eyes.png，也没有发缕步骤）
 
 用法：
     python3 desktop_pet/launch.py            # 默认打开图形界面（单窗口）
@@ -634,7 +639,6 @@ def estimate_mask(rgb, rgba, has_alpha, box, pts, labels, engine, device,
     return clean_mask(mask, pts, labels, rgb)
 
 
-
 # ------------------------------------------------------------------
 # 输出
 # ------------------------------------------------------------------
@@ -659,17 +663,20 @@ def parse_rects(text: str | None) -> list[tuple[int, int, int, int]]:
 
 
 def save_eyes_json(source_dir: Path, stem: str, crop_size, boxes, origin,
-                   force: bool = False) -> Path | None:
+                   force: bool = False, levels=None) -> Path | None:
     """眼睛框（原图坐标）-> 裁切区域坐标，写到 source 目录供 build_one 使用。
 
     force=True 时即使没有框也写一份空 eyes 列表：明确表示“这只/这些眼不眨眼”。
+    levels 是逐只眼的处理档位（L2/L1/L0/auto），与 boxes 同序写入 manifest，
+    允许手工覆盖自动判定：同一张图里可以一只走移虹膜、另一只走整块微移。
     """
     if not boxes and not force:
         return None
     ox, oy = origin
     cw, ch = crop_size
     eyes = []
-    for bx0, by0, bx1, by1 in boxes:
+    eye_levels = []
+    for i, (bx0, by0, bx1, by1) in enumerate(boxes):
         x1, x2 = sorted((bx0 - ox, bx1 - ox))
         y1, y2 = sorted((by0 - oy, by1 - oy))
         x1, x2 = max(0, min(x1, cw)), max(0, min(x2, cw))
@@ -677,9 +684,96 @@ def save_eyes_json(source_dir: Path, stem: str, crop_size, boxes, origin,
         if x2 - x1 >= 4 and y2 - y1 >= 4:
             eyes.append({"x1": int(x1), "y1": int(y1),
                          "x2": int(x2), "y2": int(y2)})
+            if levels:
+                eye_levels.append(str(levels[i]) if i < len(levels) else "auto")
+    data = {"stem": stem, "image_size": [int(cw), int(ch)], "eyes": eyes}
+    if levels:
+        data["eye_level"] = eye_levels
     p = source_dir / f"{stem}_eyes.json"
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                 encoding="utf-8")
+    return p
+
+
+def save_hair_polys(source_dir: Path, stem: str, crop_size, wisps, origin,
+                    force: bool = False, kind: str = "hair") -> Path | None:
+    """多边形发缕 / 衣服（原图坐标）-> 裁切区域坐标，写到 source 目录供 build_one 使用。
+
+    每块落盘一张灰度 mask `<stem>_<kind>1.png`…，json 记发根(旋转中心)与发梢；
+    kind="hair" 是头发，"cloth" 是衣服 / 小附件的飘动区域。
+    force=True 时即使一块都没有也写一份空列表：明确表示这张图不做这类飘动。
+    """
+    if not wisps and not force:
+        return None
+    ox, oy = origin
+    cw, ch = crop_size
+    out = []
+
+    def clamp(v: float, hi: int) -> float:
+        return round(max(0.0, min(float(hi - 1), v)), 1)
+
+    for i, w in enumerate(wisps, 1):
+        m = w["mask"][oy:oy + ch, ox:ox + cw]
+        if m.shape != (ch, cw) or not m.any():
+            continue
+        name = f"{stem}_{kind}{i}.png"
+        cv2.imwrite(str(source_dir / name), m.astype(np.uint8) * 255)
+        out.append({"mask": name,
+                    "pivot": [clamp(float(w["pivot"][0]) - ox, cw),
+                              clamp(float(w["pivot"][1]) - oy, ch)],
+                    "tip": [clamp(float(w["tip"][0]) - ox, cw),
+                            clamp(float(w["tip"][1]) - oy, ch)]})
+    keep = {it["mask"] for it in out}
+    for old in source_dir.glob(f"{stem}_{kind}*.png"):
+        if old.name not in keep:
+            old.unlink()
+    p = source_dir / f"{stem}_{kind}.json"
     p.write_text(json.dumps({"stem": stem, "image_size": [int(cw), int(ch)],
-                             "eyes": eyes}, ensure_ascii=False, indent=2),
+                             "wisps": out}, ensure_ascii=False, indent=2),
+                 encoding="utf-8")
+    return p
+
+
+def save_blink_json(source_dir: Path, stem: str, plan: dict) -> Path:
+    """眨眼时间轴 -> source 目录的 <stem>_blink.json（与坐标无关，可直接用）。
+
+    每个对象是 {group: 眼组, count: 眼睛数量, levels: ["L1-1","L1-2"],
+    t: 循环内触发秒数, hold: 闭眼保持秒数}，按 (t, group) 升序保存。
+    """
+    items = []
+    for it in plan.get("items") or []:
+        try:
+            group = max(1, int(it.get("group", 1)))
+            t = max(0.0, float(it["t"]))
+            hold = min(3.0, max(0.03, float(it.get("hold", 0.2))))
+            count = min(8, max(1, int(it.get("count", 2))))
+        except (KeyError, TypeError, ValueError):
+            continue
+        levels = []
+        for tok in it.get("levels") or []:
+            try:
+                eye = int(tok.get("eye", 0))
+            except (TypeError, ValueError):
+                continue
+            lv = str(tok.get("level") or "auto")
+            if eye >= 1:
+                levels.append(f"{'自动' if lv == 'auto' else lv}-{eye}")
+        items.append({"group": group, "t": round(t, 2),
+                      "hold": round(hold, 2), "count": count,
+                      "levels": levels})
+    items.sort(key=lambda it: (it["t"], it["group"]))
+    try:
+        cycle = max(1.0, float(plan.get("cycle", 8.0)))
+    except (TypeError, ValueError):
+        cycle = 8.0
+    p = source_dir / f"{stem}_blink.json"
+    p.write_text(json.dumps({"stem": stem,
+                             "blink": {"enabled": bool(plan.get("enabled", True)),
+                                       "on": bool(plan.get("blink", True)),
+                                       "gaze": bool(plan.get("gaze", True)),
+                                       "cycle": round(cycle, 2),
+                                       "items": items}},
+                            ensure_ascii=False, indent=2),
                  encoding="utf-8")
     return p
 
@@ -707,15 +801,16 @@ def update_manifest(out_dir: Path, sku: str, item: dict) -> Path:
 # ------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(
-        description="选图 -> 框取 -> 选点 -> 预览(可返回补点) -> 框眼睛 -> 生成桌宠")
+        description="选图 -> 框取 -> 选点 -> 预览(可返回补点) -> 多边形眼眶 -> 生成桌宠")
     ap.add_argument("--image", default=None, help="图片路径；不填则弹出文件选择框")
     ap.add_argument("--box", default=None, help="跳过第 1 步，直接给 x0,y0,x1,y1")
     ap.add_argument("--points", default=None,
                     help="跳过第 2 步，格式 x,y,f;x,y,b（f=前景 b=背景）")
     ap.add_argument("--eyes-boxes", default=None,
-                    help="跳过第 4 步（框眼睛），格式 x0,y0,x1,y1;x0,y0,x1,y1（原图坐标）")
+                    help="跳过第 4 步，直接给外接框（--cli 用；界面里是画多边形眼眶）"
+                         "，格式 x0,y0,x1,y1;x0,y0,x1,y1（原图坐标）")
     ap.add_argument("--no-points", action="store_true", help="跳过选点（不标点）")
-    ap.add_argument("--no-eyes", action="store_true", help="跳过框眼睛（用自动检测）")
+    ap.add_argument("--no-eyes", action="store_true", help="跳过眼眶标注（用自动检测）")
     ap.add_argument("--no-preview", action="store_true",
                     help="跳过分割预览确认，直接生成素材")
     ap.add_argument("--engine", choices=("auto", "sam", "grabcut"), default="auto",
@@ -834,7 +929,7 @@ def main():
             print(f"    前景 {(labels == 1).sum()} 个，背景 {(labels == 0).sum()} 个")
 
     # ---------- 第 4 步：预览分割结果（a 返回补点） ----------
-    print("[4/6] 第 4 / 6 步 · 预览分割结果")
+    print("[4/6] 第 3 / 4 步 · 预览分割结果")
     prev_pts = []
     if pts is not None:
         prev_pts = [[int(x), int(y), int(l)] for (x, y), l in zip(pts, labels)]
@@ -846,13 +941,13 @@ def main():
         print("    --no-preview，直接采用当前掩膜")
     else:
         while True:
-            act = preview_mask(rgb, box, mask, "第 4 / 6 步 · 预览分割结果")
+            act = preview_mask(rgb, box, mask, "第 3 / 4 步 · 预览分割结果")
             if act == "ok":
                 break
             if act == "cancel":
                 sys.exit("已取消")
             res = pick_points(
-                rgb, box, "第 4 / 6 步 · 补点精修（回车重新分割）",
+                rgb, box, "第 3 / 4 步 · 补点精修（回车重新分割）",
                 "左键 = 前景(红)   右键 = 背景(蓝)   回车 = 重新分割\n"
                 "u = 撤销上一个点    r = 全部清空    s = 不再补点    ESC = 取消",
                 prev=prev_pts)
@@ -869,7 +964,7 @@ def main():
                                  args.engine, args.device, cache)
 
     # ---------- 第 5 步：框眼睛 ----------
-    print("[5/6] 第 5 / 6 步 · 定位左眼 / 右眼（用于视线与眨眼）")
+    print("[5/6] 第 4 / 4 步 · 定位左眼 / 右眼（用于视线与眨眼）")
     eyes_boxes = []
     eyes_manual = False
     if args.eyes_boxes:
@@ -880,19 +975,22 @@ def main():
         print("    --no-eyes，跳过左眼/右眼定位（启动时自动检测）")
     else:
         eyes_manual = True
-        for idx, name in ((1, "左眼"), (2, "右眼")):
+        idx = 1
+        while True:
             res = pick_rect(
-                rgb, f"第 5 / 6 步 · 定位{name}（{idx}/2）",
-                f"框住{name}的整个眼窝（含眼白），拖拽或点两个对角，回车确认\n"
-                f"u = 撤销    r = 重框    s = 跳过{name}    ESC = 取消",
+                rgb, f"第 4 / 4 步 · 框眼睛（第 {idx} 只）",
+                "框住一只眼睛的整个眼窝（含眼白），拖拽或点两个对角，回车确认\n"
+                "确认后会继续框下一只；u = 撤销当前框    s = 完成框眼    ESC = 取消",
                 color="cyan", allow_skip=True, full_key=False)
             if res is None:
                 sys.exit("已取消")
             if res is SKIP:
-                print(f"    {name}：跳过，这只眼不眨眼、不跟随视线")
-                continue
+                break
             eyes_boxes.append(res)
-            print(f"    {name}框 {res}")
+            print(f"    第 {idx} 只眼框 {res}")
+            idx += 1
+        print(f"    共框了 {len(eyes_boxes)} 只眼"
+              + ("（不做眨眼/视线）" if not eyes_boxes else ""))
 
     # ---------- 第 6 步：生成素材 ----------
     print("[6/6] 生成透明素材")
@@ -932,15 +1030,25 @@ def main():
     print("[启动] 桌宠窗口（拖动/滚轮缩放/右键退出）")
     from PyQt6.QtWidgets import QApplication
     from anim import PetAsset
-    from pet_window import PetWindow
+    from manifest_io import active_eye_indices
+    from pet_window import PetWindow, prefer_xcb
 
-    asset = PetAsset.load(out_dir / f"{stem}.png", eyes=item.get("eyes"))
+    asset = PetAsset.load(out_dir / f"{stem}.png", eyes=item.get("eyes"),
+                          hair=item.get("hair"),
+                          cloth=item.get("cloth"),
+                          blink=item.get("blink"),
+                          eye_masks=[out_dir / n for n in
+                                     (item.get("eyes_mask") or [])],
+                          eye_level=item.get("eye_level"),
+                          active_eyes=active_eye_indices(item))
     asset.anchor = (item["anchor"]["x"], item["anchor"]["y"])
+    prefer_xcb()   # 必须在 QApplication 之前决定平台插件
     app = QApplication(sys.argv[:1])
     height = args.height or item.get("display_height_px") or 256
     win = PetWindow(asset, height)
     win.show()
-    print(f"    眼睛 {len(asset.eyes)} 个，眨眼帧 {len(win.blink_pixmaps)} 张")
+    print(f"    眼睛 {len(asset.eyes)} 个，眨眼帧 {len(win.blink_pixmaps)} 张，"
+          f"眨眼时间轴 {'开' if asset.blinks else '关（随机）'}")
     sys.exit(app.exec())
 
 
