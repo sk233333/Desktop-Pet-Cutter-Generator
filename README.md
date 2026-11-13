@@ -3,7 +3,7 @@
 把白底手办照片自动抠成**带透明通道的桌宠素材**（PNG + 无损 WebP + manifest），
 供 PyQt / Electron / 网页桌宠直接使用。
 
-> 原「瑕疵检测」工程已整体移除；本仓库现在只保留抠图工具、30 张 OK 抠图源与已生成的桌宠素材。
+> 原「瑕疵检测」工程已整体移除；本仓库只保留抠图工具与桌宠运行时。手办素材（源图、mask、标注、生成产物）因版权与体积原因不入库，需自备，见 [docs/ASSETS.md](docs/ASSETS.md)。
 
 ---
 
@@ -27,11 +27,11 @@ Little-figurine-rating/
 │   └── assets/<sku>/          生成产物：<stem>.png / .webp / _preview.png / manifest.json
 └── Punctuation_selection_of_images/
     ├── image_assist.py        批量抠图/白底生成工具（SAM + YOLO）
-    ├── image_assist_ans/      30 张 OK 白底图
-    └── sam2.1_hiera_small.pt  SAM 权重
+    ├── image_assist_ans/      白底图输出（本地生成，不入库）
+    └── sam2.1_hiera_small.pt  SAM 权重（本地放置，不入库）
 ```
 
-`desktop_pet/assets/` 是生成产物，已加入 `.gitignore`；`source/` 建议入库存源图与 mask。
+`desktop_pet/source/`、`desktop_pet/assets/` 与 `image_assist_ans/` 均不入库：素材需自备，说明见 [docs/ASSETS.md](docs/ASSETS.md)。
 
 ---
 
