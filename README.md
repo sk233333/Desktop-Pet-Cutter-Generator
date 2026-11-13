@@ -7,6 +7,10 @@
 >
 > Code: MIT（见 [LICENSE](LICENSE)） · Assets: user-supplied, see [docs/ASSETS.md](docs/ASSETS.md) · 第三方依赖与模型权重见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
+> ⚠️ **2026-11-13 历史重写**：为移除误入历史的模型权重，仓库已改写历史并强推。
+> 若你在此时间之前 clone / fork，请**重新 clone**；旧 commit hash 全部失效。
+> 本次仅清理权重文件，代码、文档与 Release 内容均未改变。
+
 ---
 
 ## 一、目录
