@@ -13,7 +13,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install numpy opencv-python-headless pytest
+        # anim.py 用 PIL 读眼眶 mask；漏了会在 import 阶段直接红
+        run: pip install numpy opencv-python-headless pillow pytest
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
