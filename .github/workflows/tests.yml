@@ -18,4 +18,7 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests -q
+        run: |
+          set -o pipefail
+          python -m pytest tests -q | tee pytest.log
+          tail -1 pytest.log >> "$GITHUB_STEP_SUMMARY"
