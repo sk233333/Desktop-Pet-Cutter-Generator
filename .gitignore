@@ -12,6 +12,9 @@ venv/
 # 生成产物（透明素材包）
 desktop_pet/assets/
 
+# 素材源包（版权原因不入库，说明见 docs/ASSETS.md）
+desktop_pet/source/custom/
+
 # 抠图中间产物 / 批量输出
 Punctuation_selection_of_images/image_assist_process/
 Punctuation_selection_of_images/image_assist_ans/
