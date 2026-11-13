@@ -4,6 +4,8 @@
 供 PyQt / Electron / 网页桌宠直接使用。
 
 > 原「瑕疵检测」工程已整体移除；本仓库只保留抠图工具与桌宠运行时。手办素材（源图、mask、标注、生成产物）因版权与体积原因不入库，需自备，见 [docs/ASSETS.md](docs/ASSETS.md)。
+>
+> Code: MIT（见 [LICENSE](LICENSE)） · Assets: user-supplied, see [docs/ASSETS.md](docs/ASSETS.md) · 第三方依赖与模型权重见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ---
 
