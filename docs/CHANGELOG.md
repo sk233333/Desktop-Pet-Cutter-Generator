@@ -2,6 +2,12 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## 边界登记（未实现，不计行为变更）
+
+- 嘴型 overlay：首期只计划在桌面运行时合成；编辑器 `PetPreview` 自带取帧管线，
+  不走 `PetWindow._pick_frame()`，首期不同步，按「显式接受差异」处理。
+  边界与断言见 `docs/HANDOFF_MOUTH_OVERLAY.md`。
+
 ## AI 对话接入（A1，默认关闭）
 
 ### 行为变更
@@ -20,8 +26,8 @@
 
 - `partial_text()`：流式 JSON 只把 `text` 字段的已到达部分冒进气泡，避免先闪
   `{"text":...}`。抽不到 `text` 时：JSON 头部未到 → 返回空串（气泡显示 `…`）；
-  非 JSON 纯文本 → 回退为可见原文尾部。最终仍由 `safe_parse` 判定，
-  非 JSON 回复静默失败回 idle。
+  非 JSON 纯文本 → 回退为可见原文尾部。最终仍由 `safe_parse` 判定；
+  非 JSON 回复会**先短暂显示这段原文尾部，随后回 idle**（不是完全无显示）。
 - system prompt 显式包含小写 `json` 字样，作为 `json_mode=object` 的稳妥条件
   （只给 `response_format` 不给指令时，部分实现会失败或返回空）。
 
