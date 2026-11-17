@@ -2,6 +2,36 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## 能力补全向导（首期）
+
+### 行为变更
+
+- **新增六步「能力补全向导」**（`upgrade_wizard.py`，主界面唯一入口）：
+  选 SKU → 体检 → 挑补全器 → 并排预览 → 落盘 → 报告。纯本地、不联网。
+- **三个补全器**：`mask.from_ellipse`（椭圆 socket，已有 mask 跳过、逐只点选）、
+  `mask.domain_hint`（只读候选框）、`mouth.open`（独立覆盖层 PNG）。
+- **体检面板**：把 Issue #1/#2、25° 未标定、`bias` 未暴露、`smile` 缺失
+  列成可见清单；`smile` 标 `v0.1.1` 且不可勾选，不自动关 Issue。
+- **落盘闸门**：逐候选 `commit` 只返回 `ChangeSet`，由 `upgrade_core` 统一
+  过 `validate_manifest`、原子写、失败整体回滚；路径锁死在当前 SKU 目录。
+- **`allowed` 只产提案**：`derive_allowed()` 未实现前不写运行时词表，
+  提案不含 `smile` / `blink`。
+
+### 数据格式
+
+- v1 manifest 首次落盘时走 `manifest_io.v1_to_v2` 同一迁移入口，转 v2 后再
+  应用补丁；不另写转换。
+- `items[]` 可带可选 `mouth_dir` / `mouth_level`；**当前为数据槽，运行时未消费**
+  （`anim.build_expr_bank()` 未传 `mouth_dir`，接线需显式放行，排 v0.1.1）；
+  `ExprBank.STATES` 与 `smile → half` 别名不变。
+
+### 测试与状态
+
+- `pytest -q` = **108 passed**（pre-wizard 基线 93，以 `pytest -q` 当前结果为准）。
+- 三档状态：**已实现** = 六步向导 + 三个补全器；**未接线** = `mouth_dir` 运行时消费；
+  **待拍板** = `smile` 独立状态、`derive_allowed()`、配置期生成式候选（AI 范围页）。
+- Step 1 的「smile 缺失」只是体检项，标 `v0.1.1`，**不代表本轮能补**。
+
 ## 摆动收敛（逐区域幅度 / 方向 / bias）
 
 ### 行为变更

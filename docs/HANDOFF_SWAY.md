@@ -107,7 +107,7 @@
 ## 五、实测与验证（当前基线）
 
 - `python3 -m py_compile desktop_pet/ui_app.py desktop_pet/anim.py desktop_pet/launch.py desktop_pet/cutout_to_pet.py desktop_pet/pet_window.py` 通过。
-- `python3 -m pytest -q` → **93 passed**（`tests/test_sway_fields.py` 19 条 + `tests/test_swing_batch.py` 3 条，覆盖 axis 投影 / bias golden /
+- `python3 -m pytest -q` → **93 passed**（pre-sway / pre-wizard 快照，以 `pytest -q` 当前结果为准；`tests/test_sway_fields.py` 19 条 + `tests/test_swing_batch.py` 3 条，覆盖 axis 投影 / bias golden /
   内摆 60% / 14px 上限 / sidecar 往返 / manifest 映射与校验 / schema 一致性 / masks_dirty /
   按 SKU 配置）。
 - 离屏冒烟（`QT_QPA_PLATFORM=offscreen`）：

@@ -3450,6 +3450,13 @@ class LaunchUI(QWidget):
         rw.setContentsMargins(2, 2, 2, 2)
         rw.setSpacing(10)
         rw.addWidget(scroll, 1)
+        # 能力补全向导：唯一入口；只注入现有预览引擎实例，不在这里放流程逻辑
+        self.btn_upgrade = QPushButton("能力补全向导…")
+        self.btn_upgrade.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_upgrade.setToolTip(
+            "体检当前 SKU：补眼眶 socket / 嘴型覆盖层，逐候选人工确认；本地运行、不联网")
+        self.btn_upgrade.clicked.connect(self._open_upgrade_wizard)
+        rw.addWidget(self.btn_upgrade)
         rw.addWidget(self.btn_start)
         rw.addWidget(self.ck_launch)
         rw.addWidget(g_log)
@@ -4910,6 +4917,17 @@ class LaunchUI(QWidget):
         self._pet_key = key
         self._pet_engine_cache = eng
         return eng
+
+    def _open_upgrade_wizard(self):
+        """懒加载向导；注入现有预览引擎实例，关闭向导不影响主窗口预览。"""
+        try:
+            from upgrade_wizard import UpgradeWizard
+        except Exception as exc:              # noqa: BLE001
+            QMessageBox.warning(self, "能力补全向导", f"无法加载向导：{exc}")
+            return
+        eng = getattr(self, "_pet_engine_cache", None)
+        dlg = UpgradeWizard(self, engine=eng)
+        dlg.exec()
 
     def _save_source(self):
         """剪切结果落盘：白底裁切图 + 掩膜，素材生成和选做步骤都读这两个文件。"""

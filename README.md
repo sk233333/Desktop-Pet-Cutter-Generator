@@ -251,6 +251,24 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
   顶部**「清空回收箱」**会先弹一次确认，确认后把 `assets/.trash/` 整个删掉，
   这些桌宠的素材数据**永久删除、无法恢复**
 
+### 能力补全向导（本地、不联网）
+
+编辑器右侧**「能力补全向导…」**打开六步向导：选 SKU → 体检 → 挑补全器 →
+并排预览 → 落盘 → 报告。它补的是「已有功能缺的数据」，不是软件版本升级。
+首期只注册三个纯本地补全器：
+
+| id | 作用 | 落盘 |
+| --- | --- | --- |
+| `mask.from_ellipse` | 用 `eyes` 椭圆生成 socket（已有 mask 跳过；必须逐只点清真眼） | 覆盖层 PNG + `parts[].mask` |
+| `mask.domain_hint` | 只读候选框：把「哪只可能是真眼」摆给人看 | 不写盘 |
+| `mouth.open` | 补 `mouth_dir` 空槽（闭 / 微笑 / 小 o） | 独立覆盖层 PNG + `mouth_dir` |
+
+- 逐 SKU、逐候选人工确认；整体否决 = 零路径。批量只出报告，**不批量 commit**。
+- 落盘统一过 `validate_manifest`；v1 manifest 走 `v1_to_v2` 同一迁移入口。
+- 原图 `base` 不动，产物一律独立覆盖层；`smile` / `calib.*` / L3 / AI 均不在首期。
+- `ExprBank` 仍是六态、`smile → half` 别名不变；`mouth_dir` 目前只是数据槽，
+  运行时尚未消费（接线排 v0.1.1，需显式放行）。测试以 `pytest -q` 当前结果为准。
+
 ### 跑起来（桌宠）
 
 ```bash

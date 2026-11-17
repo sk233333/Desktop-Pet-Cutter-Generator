@@ -36,5 +36,6 @@ mkdir -p desktop_pet/source/custom desktop_pet/assets/custom
 
 ## 已知限制
 
+- `docs/images/` 为本地截图暂存，未纳入版本控制；`git status` 里看到它属正常。
 - 缺 `_eyes.png` 的素材在 manifest v1 下仍按全部检测到的眼做眨眼/视线；迁移到 v2 后会被过滤掉，见 `docs/RELEASE_v0.1.md`。
 - 装饰眼 / 挂件眼需要人工确认后单独标注，不要按「前 N 只」批量补 socket。
