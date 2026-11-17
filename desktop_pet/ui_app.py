@@ -57,7 +57,7 @@ from anim import (Eye, HairField, HairWisp, blink_group_counts,  # noqa: E402
                   blink_phases, blinks_from_plan, build_expr_bank,
                   build_gaze_geos,
                   checkerboard, eye_group_bbox, gaze_frame, group_eyes,
-                  load_eye_masks, make_blink_frames)
+                  load_eye_masks, make_blink_frames, sway_axis)
 from anim import PetAsset  # noqa: E402
 from expr_state import ExprState  # noqa: E402
 from pet_window import PetPack, PetWindow, prefer_xcb  # noqa: E402
@@ -332,7 +332,7 @@ def _draw_paw(p: QPainter, cx: float, cy: float, s: float, color: QColor):
 
 
 def _rail_icon(kind: str, color: str, size: int = 48) -> QIcon:
-    """右侧竖条的线性小图标：tune 动作参数 / crop 框取 / eye 眼睛 / hair 头发 / spark 生成 / folder 目录。"""
+    """右侧竖条的线性小图标：tune 动作参数 / crop 框取 / eye 眼睛 / sway 摆动 / spark 生成 / folder 目录。"""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -353,24 +353,13 @@ def _rail_icon(kind: str, color: str, size: int = 48) -> QIcon:
             p.drawEllipse(QPointF(24 + dx, y), 3.8, 3.8)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-    elif kind == "cloth":
-        # 小衣服：短袖 + 领口，代表衣摆 / 小物件的飘动
-        body = QPainterPath(QPointF(18, 11))
-        body.lineTo(30, 11)
-        body.lineTo(36, 15)
-        body.lineTo(33, 21)
-        body.lineTo(30, 19)
-        body.lineTo(30, 38)
-        body.lineTo(18, 38)
-        body.lineTo(18, 19)
-        body.lineTo(15, 21)
-        body.lineTo(12, 15)
-        body.closeSubpath()
-        p.drawPath(body)
-        neck = QPainterPath(QPointF(21, 11))
-        neck.lineTo(24, 15)
-        neck.lineTo(27, 11)
-        p.drawPath(neck)
+    elif kind == "sway":
+        # 飘动：两条同向流动的曲线，头发与衣摆共用这一个入口
+        for y in (19, 30):
+            path = QPainterPath(QPointF(8, y))
+            path.cubicTo(QPointF(18, y - 9), QPointF(30, y + 9),
+                         QPointF(40, y - 1))
+            p.drawPath(path)
     elif kind == "crop":
         p.drawLine(QPointF(17, 7), QPointF(17, 31))
         p.drawLine(QPointF(17, 31), QPointF(41, 31))
@@ -384,12 +373,6 @@ def _rail_icon(kind: str, color: str, size: int = 48) -> QIcon:
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(color))
         p.drawEllipse(QPointF(24, 24), 5.4, 5.4)
-    elif kind == "hair":
-        for dx in (-11, 0, 11):
-            path = QPainterPath(QPointF(24 + dx, 9))
-            path.cubicTo(QPointF(24 + dx - 7, 19),
-                         QPointF(24 + dx + 7, 27), QPointF(24 + dx, 39))
-            p.drawPath(path)
     elif kind == "table":
         # 小桌子 + 向下的箭头：桌子模式（重力）
         top = QPainterPath()
@@ -745,6 +728,10 @@ class ClickSpinBox(ClickOnlyMixin, QSpinBox):
 
 class ClickDoubleSpinBox(ClickOnlyMixin, QDoubleSpinBox):
     pass
+
+
+class ClickSlider(ClickOnlyMixin, QSlider):
+    """拖动条同样不响应滚轮：面板滚动时不会顺手改掉幅度。"""
 
 
 class AnimSlider(QWidget):
@@ -1215,6 +1202,13 @@ class PetPreview:
                 self._gaze_cache.pop(self._gaze_order.pop(0), None)
         return base
 
+    def set_sway_params(self, hair_params, cloth_params):
+        """逐区域幅度 / 方向就地生效（不重建位移场，拖动幅度条不卡）。"""
+        if self.hair is not None:
+            self.hair.apply_params(hair_params or [])
+        if self.cloth is not None:
+            self.cloth.apply_params(cloth_params or [])
+
     def frame(self, dt: float = 0.05) -> np.ndarray:
         """前进一帧，返回这一帧的 RGBA。"""
         if self.expr is not None:
@@ -1610,6 +1604,10 @@ class ImageCanvas(QGraphicsView):
         pm = self._pet_pixmap(self._pet_live.frame())
         if pm is not None:
             self.pix_item.setPixmap(pm)
+
+    def refresh_pet(self):
+        """立刻重画一帧：只改了逐区域幅度/方向时，不必重建整个渲染引擎。"""
+        self._next_pet_frame()
 
     def _pet_pixmap(self, arr):
         if arr is None:
@@ -3027,7 +3025,7 @@ class LaunchUI(QWidget):
             "选择图片后点「开始处理」：框取手办并抠图。左边是框选出来的内容、"
             "右边是白底预览；每一步上方都有按钮（确认 / 撤销 / 重来 / 跳过 / 取消）。"
             "抠完手办会按本来大小停在画布中间：眼睛跟着鼠标看、按时间轴眨眼、发缕和衣摆随风飘，"
-            "并左右轻摇；点左侧竖条「眼睛」「头发」「衣服」只暂停摇摆，方便标注。")
+            "并左右轻摇；点左侧竖条「眼睛」「摆动」只暂停摇摆，方便标注。")
         self.hint_label.setWordWrap(True)
         self.hint_label.setStyleSheet("color:#8d99a8;")
         head = QHBoxLayout()
@@ -3188,11 +3186,10 @@ class LaunchUI(QWidget):
         # 输出参数搬进齿轮「设置」，主界面右侧只留步骤与选项
         self.settings_dlg = self._make_settings_dialog()
 
-        # ---- 选做：眼睛 / 头发 / 衣服 的切换按钮搬到右侧竖条，这里只放面板 ----
+        # ---- 选做：眼睛 / 摆动 的切换按钮搬到右侧竖条，这里只放面板 ----
         self.btn_tab_eyes = QPushButton("眼睛")
-        self.btn_tab_hair = QPushButton("头发")
-        self.btn_tab_cloth = QPushButton("衣服")
-        for b in (self.btn_tab_eyes, self.btn_tab_hair, self.btn_tab_cloth):
+        self.btn_tab_sway = QPushButton("摆动")
+        for b in (self.btn_tab_eyes, self.btn_tab_sway):
             b.setCheckable(True)
             b.setAutoExclusive(True)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -3324,121 +3321,88 @@ class LaunchUI(QWidget):
         ev.addWidget(g_eye)
         self.opt_stack.addWidget(page_eyes)
 
-        # ---- 头发面板 ----
-        page_hair = QWidget()
-        hv = QVBoxLayout(page_hair)
-        hv.setContentsMargins(0, 4, 0, 0)
-        hv.setSpacing(8)
-        g_hair = QGroupBox("头发飘动")
-        gh = QVBoxLayout(g_hair)
-        gh.setSpacing(8)
-        self.btn_hair = QPushButton("标注发缕…（多边形）")
-        self.btn_hair.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_hair.setEnabled(False)
-        self.btn_hair.clicked.connect(self._annotate_hair)
-        gh.addWidget(self.btn_hair)
-        lbl_hair = QLabel("沿一缕头发的轮廓点一圈（第一个顶点 = 发根），回车/「闭合发缕」闭合；"
-                          "右键拖动可平移图片；"
-                          "可继续画下一缕。标完会先播「头发飘动预览」："
+        # ---- 摆动面板：头发与衣服共用同一套标注与列表 ----
+        page_sway = QWidget()
+        sv = QVBoxLayout(page_sway)
+        sv.setContentsMargins(0, 4, 0, 0)
+        sv.setSpacing(8)
+        g_sway = QGroupBox("飘动区域（头发 / 衣服）")
+        gs = QVBoxLayout(g_sway)
+        gs.setSpacing(8)
+
+        trow = QHBoxLayout()
+        trow.addWidget(QLabel("类型"))
+        self.cb_sway_type = ClickComboBox()
+        self.cb_sway_type.addItem("头发（发缕）", "hair")
+        self.cb_sway_type.addItem("衣服 / 小物件", "cloth")
+        self.cb_sway_type.setToolTip("标注与列表都作用于这一类型；两类的飘动物理完全一样")
+        trow.addWidget(self.cb_sway_type, 1)
+        gs.addLayout(trow)
+
+        self.btn_sway = QPushButton("标注飘动区域…（多边形）")
+        self.btn_sway.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_sway.setEnabled(False)
+        self.btn_sway.clicked.connect(self._annotate_sway)
+        gs.addWidget(self.btn_sway)
+        lbl_sway = QLabel("沿一缕头发或衣摆的轮廓点一圈（第一个顶点 = 固定端），回车/「闭合」闭合；"
+                          "右键拖动可平移图片；可继续画下一块。标完会先播飘动预览："
                           "u 回退重画、s 保存。不标注就不做飘动，不影响出素材。")
-        lbl_hair.setWordWrap(True)
-        lbl_hair.setStyleSheet("color:#8d99a8;")
-        gh.addWidget(lbl_hair)
+        lbl_sway.setWordWrap(True)
+        lbl_sway.setStyleSheet("color:#8d99a8;")
+        gs.addWidget(lbl_sway)
 
-        lbl_hair_list = QLabel("发缕列表（点一行会在上面的桌宠上亮起绿色流光）")
-        lbl_hair_list.setStyleSheet("color:#3e4a5c;font-weight:700;font-size:14px;")
-        gh.addWidget(lbl_hair_list)
+        lbl_sway_list = QLabel("飘动区域列表（头发与衣服共用；点一行会亮起流光）")
+        lbl_sway_list.setStyleSheet("color:#3e4a5c;font-weight:700;font-size:14px;")
+        gs.addWidget(lbl_sway_list)
 
-        self.tb_hair = QTableWidget(0, 2)
-        self.tb_hair.setHorizontalHeaderLabels(["发缕", "发梢 (x, y)"])
-        self.tb_hair.horizontalHeaderItem(0).setToolTip("发缕编号：1 = 第一条画的多边形")
-        self.tb_hair.horizontalHeaderItem(1).setToolTip(
-            "静止时的发梢位置（裁切图坐标），用于算摆动力学方向")
-        self.tb_hair.verticalHeader().setVisible(False)
-        self.tb_hair.setAlternatingRowColors(True)
-        self.tb_hair.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tb_hair.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        hv_hdr = self.tb_hair.horizontalHeader()
-        hv_hdr.setMinimumSectionSize(44)
-        hv_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hv_hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tb_hair.setFixedHeight(100)
-        self.tb_hair.itemSelectionChanged.connect(self._highlight_selection)
-        gh.addWidget(self.tb_hair)
-
-        hrow = QHBoxLayout()
-        self.btn_hair_del = QPushButton("删除选中")
-        self.btn_hair_clear = QPushButton("清空")
-        for b in (self.btn_hair_del, self.btn_hair_clear):
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            hrow.addWidget(b)
-        self.btn_hair_del.clicked.connect(self._remove_hair_rows)
-        self.btn_hair_clear.clicked.connect(self._clear_hair_rows)
-        gh.addLayout(hrow)
-        hv.addWidget(g_hair)
-        hv.addStretch(1)
-        self.opt_stack.addWidget(page_hair)
-
-        # ---- 衣服 / 小物件面板：与头发同一套飘动逻辑 ----
-        page_cloth = QWidget()
-        cv = QVBoxLayout(page_cloth)
-        cv.setContentsMargins(0, 4, 0, 0)
-        cv.setSpacing(8)
-        g_cloth = QGroupBox("衣服 / 小物件飘动")
-        gc = QVBoxLayout(g_cloth)
-        gc.setSpacing(8)
-        self.btn_cloth = QPushButton("标注衣摆 / 小物件…（多边形）")
-        self.btn_cloth.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_cloth.setEnabled(False)
-        self.btn_cloth.clicked.connect(self._annotate_cloth)
-        gc.addWidget(self.btn_cloth)
-        lbl_cloth = QLabel("沿衣摆、袖子、挂饰等会飘的轮廓点一圈（第一个顶点 = 固定端），"
-                           "回车/「闭合」闭合；右键拖动可平移图片；可继续画下一块。"
-                           "标完会先播「衣服飘动预览」：u 回退重画、s 保存。"
-                           "不标注就不做飘动，不影响出素材。")
-        lbl_cloth.setWordWrap(True)
-        lbl_cloth.setStyleSheet("color:#8d99a8;")
-        gc.addWidget(lbl_cloth)
-
-        lbl_cloth_list = QLabel("衣物列表（点一行会在上面的桌宠上亮起蓝色流光）")
-        lbl_cloth_list.setStyleSheet("color:#3e4a5c;font-weight:700;font-size:14px;")
-        gc.addWidget(lbl_cloth_list)
-
-        self.tb_cloth = QTableWidget(0, 2)
-        self.tb_cloth.setHorizontalHeaderLabels(["衣物", "末端 (x, y)"])
-        self.tb_cloth.horizontalHeaderItem(0).setToolTip("衣物编号：1 = 第一块画的区域")
-        self.tb_cloth.horizontalHeaderItem(1).setToolTip(
+        self.tb_sway = QTableWidget(0, 5)
+        self.tb_sway.setHorizontalHeaderLabels(
+            ["类型", "区域", "摆动轴（往返）", "幅度", "末端 (x, y)"])
+        self.tb_sway.horizontalHeaderItem(0).setToolTip(
+            "头发 / 衣服：两类共用同一套飘动物理")
+        self.tb_sway.horizontalHeaderItem(1).setToolTip(
+            "区域编号：1 = 第一条画的多边形")
+        self.tb_sway.horizontalHeaderItem(2).setToolTip(
+            "这块区域的摆动轴（往返轴），不是「往哪边飘」；\n"
+            "默认 = 沿发丝 / 衣摆法线；标了 ⊥ 表示所选方向与丝长太近，已自动改用垂直分量")
+        self.tb_sway.horizontalHeaderItem(3).setToolTip(
+            "这块区域自己的摆动幅度：拖动即可调整，0 = 这块不动")
+        self.tb_sway.horizontalHeaderItem(4).setToolTip(
             "静止时的末端位置（裁切图坐标），用于算摆动力学方向")
-        self.tb_cloth.verticalHeader().setVisible(False)
-        self.tb_cloth.setAlternatingRowColors(True)
-        self.tb_cloth.setSelectionBehavior(
+        self.tb_sway.verticalHeader().setVisible(False)
+        self.tb_sway.setAlternatingRowColors(True)
+        self.tb_sway.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tb_cloth.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        cv_hdr = self.tb_cloth.horizontalHeader()
-        cv_hdr.setMinimumSectionSize(44)
-        cv_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        cv_hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tb_cloth.setFixedHeight(100)
-        self.tb_cloth.itemSelectionChanged.connect(self._highlight_selection)
-        gc.addWidget(self.tb_cloth)
+        self.tb_sway.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        sv_hdr = self.tb_sway.horizontalHeader()
+        sv_hdr.setMinimumSectionSize(40)
+        sv_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        sv_hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        sv_hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        sv_hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        sv_hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.tb_sway.setColumnWidth(2, 96)
+        self.tb_sway.setColumnWidth(3, 132)
+        self.tb_sway.verticalHeader().setDefaultSectionSize(34)
+        self.tb_sway.setFixedHeight(150)
+        self.tb_sway.itemSelectionChanged.connect(self._highlight_selection)
+        gs.addWidget(self.tb_sway)
 
-        crow = QHBoxLayout()
-        self.btn_cloth_del = QPushButton("删除选中")
-        self.btn_cloth_clear = QPushButton("清空")
-        for b in (self.btn_cloth_del, self.btn_cloth_clear):
+        grow = QHBoxLayout()
+        self.btn_sway_del = QPushButton("删除选中")
+        self.btn_sway_clear = QPushButton("清空")
+        for b in (self.btn_sway_del, self.btn_sway_clear):
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            crow.addWidget(b)
-        self.btn_cloth_del.clicked.connect(self._remove_cloth_rows)
-        self.btn_cloth_clear.clicked.connect(self._clear_cloth_rows)
-        gc.addLayout(crow)
-        cv.addWidget(g_cloth)
-        cv.addStretch(1)
-        self.opt_stack.addWidget(page_cloth)
+            grow.addWidget(b)
+        self.btn_sway_del.clicked.connect(self._remove_sway_rows)
+        self.btn_sway_clear.clicked.connect(self._clear_sway_rows)
+        gs.addLayout(grow)
+        sv.addWidget(g_sway)
+        sv.addStretch(1)
+        self.opt_stack.addWidget(page_sway)
 
         self.btn_tab_eyes.clicked.connect(lambda: self._switch_opt_page(0))
-        self.btn_tab_hair.clicked.connect(lambda: self._switch_opt_page(1))
-        self.btn_tab_cloth.clicked.connect(lambda: self._switch_opt_page(2))
+        self.btn_tab_sway.clicked.connect(lambda: self._switch_opt_page(1))
         self.opt_stack.setCurrentIndex(0)
         right.addStretch(1)
 
@@ -3504,20 +3468,18 @@ class LaunchUI(QWidget):
         self.rail = QFrame()
         self.rail.setObjectName("sideRail")
         self.rail.setFixedWidth(68)
-        self.rail.setFixedHeight(7 * 48 + 6 * 12 + 2 * 14 + 4)
+        self.rail.setFixedHeight(6 * 48 + 5 * 12 + 2 * 14 + 4)
         self.rail.setStyleSheet(PANEL_QSS)
         rl = QVBoxLayout(self.rail)
         rl.setContentsMargins(9, 14, 9, 14)
         rl.setSpacing(12)
         for btn, kind, color, tip in (
                 (self.btn_motion, "tune", "#e08a4f",
-                 "动作参数：头发飘动 / 回弹 / 摇摆"),
-                (self.btn_tab_cloth, "cloth", "#4fa8d8",
-                 "衣服 / 小物件：标注飘动区域，和头发同一套物理"),
+                 "动作参数：头发 / 衣物飘动、回弹、摇摆"),
+                (self.btn_tab_sway, "sway", "#8a6fd4",
+                 "摆动：标注头发 / 衣服的飘动区域，共用同一套物理"),
                 (self.btn_tab_eyes, "eye", "#3b8fd4",
                  "眼睛：标注眼眶 / 调眨眼时间轴"),
-                (self.btn_tab_hair, "hair", "#8a6fd4",
-                 "头发：标注发缕 / 看飘动"),
                 (self.btn_table, "table", "#b07a4c",
                  "小桌子：开启重力，桌宠从上方落到桌面上；下落系数在动作参数里"),
                 (self.btn_build, "save", "#2f9c88",
@@ -3601,7 +3563,7 @@ class LaunchUI(QWidget):
         grid.addLayout(row4)
         v.addWidget(g_out)
 
-        # 动作参数：头发飘动 / 身体摇摆 / 回弹弹簧，改完画布上的桌宠立刻按新参数动
+        # 动作参数：飘动（头发/衣物共用）/ 身体摇摆 / 回弹弹簧，改完画布上的桌宠立刻按新参数动
         g_anim = QGroupBox("动作参数")
         ag = QGridLayout(g_anim)
         ag.setHorizontalSpacing(10)
@@ -3614,12 +3576,12 @@ class LaunchUI(QWidget):
 
         # 拖动条 0~3.0×（0 = 停止），数字框可手输更高，如 5.0×
         self.sp_hair_speed = AnimSlider(value=1.0)
-        _anim_row(0, "头发飘动速度", self.sp_hair_speed,
-                  "拖动条 0~3.0×（0 = 停止）；也可以直接在右侧输入更大，如 5.0×")
+        _anim_row(0, "飘动速度（头发/衣物）", self.sp_hair_speed,
+                  "头发与衣摆共用的飘动速度：拖动条 0~3.0×（0 = 停止）；也可以直接在右侧输入更大，如 5.0×")
 
         self.sp_hair_amp = AnimSlider(value=1.0)
-        _anim_row(1, "头发摆幅", self.sp_hair_amp,
-                  "发梢摆动的幅度，越大越飘；0 = 不摆")
+        _anim_row(1, "飘动摆幅（头发/衣物）", self.sp_hair_amp,
+                  "发梢 / 衣摆摆动的幅度，越大越飘；0 = 不摆")
 
         self.sp_hair_stiff = AnimSlider(value=1.0)
         _anim_row(2, "回弹刚度", self.sp_hair_stiff,
@@ -3873,14 +3835,13 @@ class LaunchUI(QWidget):
         self._pet_key = None        # 换个来源，别拿上一只的渲染缓存
         self._apply_edit_anim(item.get("anim") or {})
         self._restore_edit_blink(source_dir, stem, item)
-        self._sync_hair_table()
-        self._sync_cloth_table()
+        self._sync_sway_table()
         self._show_cutout()
         self._show_pet(animate=True)
         self._set_busy(False)
         self.btn_build.setToolTip("保存修改：覆盖这只桌宠原来的 PNG / WebP / manifest")
         self._step("修改中 · 改完点保存",
-                   f"已载入「{item.get('label') or stem}」：眼睛 / 头发 / 衣服 / 动作参数 / "
+                   f"已载入「{item.get('label') or stem}」：眼睛 / 摆动 / 动作参数 / "
                    "眨眼时间轴都能接着改；改完点竖条「保存素材」，覆盖同一份素材")
         self._log(f"[修改] 载入 {sku}/{stem}：保存会覆盖原素材")
         self.raise_()
@@ -3909,9 +3870,23 @@ class LaunchUI(QWidget):
                     continue
                 pivot = (float(it["pivot"][0]), float(it["pivot"][1]))
                 tip = (float(it["tip"][0]), float(it["tip"][1]))
+                try:
+                    amp = min(3.0, max(0.0, float(it.get("amp", 1.0))))
+                except (TypeError, ValueError):
+                    amp = 1.0
+                d = it.get("dir")
+                try:
+                    d = None if d is None else float(d) % 360.0
+                except (TypeError, ValueError):
+                    d = None
+                try:
+                    bias = min(45.0, max(-45.0, float(it.get("bias", 0.0))))
+                except (TypeError, ValueError):
+                    bias = 0.0
             except (KeyError, TypeError, ValueError, IndexError, OSError):
                 continue
-            out.append({"mask": mm, "pivot": pivot, "tip": tip})
+            out.append({"mask": mm, "pivot": pivot, "tip": tip,
+                        "amp": amp, "dir": d, "bias": bias})
         return out
 
     @staticmethod
@@ -4186,15 +4161,14 @@ class LaunchUI(QWidget):
         self._refresh_pet()   # 开关一变，中间的桌宠立刻跟着眨 / 不眨
 
     def _switch_opt_page(self, index: int):
-        """切换「眼睛 / 头发 / 衣服」面板，并把页签滚到顶部，方便直接看面板。
+        """切换「眼睛 / 摆动」面板，并把页签滚到顶部，方便直接看面板。
 
-        点这三个页签时，中间桌宠暂停左右摇摆，眨眼 / 目光 / 飘发 / 衣摆照常，方便看和标注。
+        点这两个页签时，中间桌宠暂停左右摇摆，眨眼 / 目光 / 飘动照常，方便看和标注。
         """
         self.opt_stack.setCurrentIndex(index)
         # 程序化切换时同步竖条按钮的选中态（autoExclusive 只在鼠标点击时自动处理）
         if hasattr(self, "btn_tab_eyes"):
-            (self.btn_tab_eyes, self.btn_tab_hair,
-             self.btn_tab_cloth)[index].setChecked(True)
+            (self.btn_tab_eyes, self.btn_tab_sway)[index].setChecked(True)
         scroll = getattr(self, "_right_scroll", None)
         if scroll is not None:
             bar = scroll.verticalScrollBar()
@@ -4205,7 +4179,7 @@ class LaunchUI(QWidget):
 
     # ---------- 选区高亮 ----------
     def _picked_masks(self) -> list:
-        """当前面板里选中的眼睛 / 发缕 / 衣物 mask（没选返回空列表）。"""
+        """当前面板里选中的眼睛 / 飘动区域 mask（没选返回空列表）。"""
         st = self._cut or {}
         idx = self.opt_stack.currentIndex()
         if idx == 0:
@@ -4219,12 +4193,15 @@ class LaunchUI(QWidget):
                 if 1 <= eye <= len(sockets):
                     out.append(sockets[eye - 1])
             return out
-        items = st.get("cloth" if idx == 2 else "hair") or []
         out = []
-        table = self.tb_cloth if idx == 2 else self.tb_hair
-        for r in {i.row() for i in table.selectedIndexes()}:
-            if 0 <= r < len(items):
-                m = items[r].get("mask")
+        for r in {i.row() for i in self.tb_sway.selectedIndexes()}:
+            it = self.tb_sway.item(r, 0)
+            if it is None:
+                continue
+            kind, i = it.data(Qt.ItemDataRole.UserRole) or (None, None)
+            items = st.get(kind) or []
+            if 0 <= i < len(items):
+                m = items[i].get("mask")
                 if m is not None:
                     out.append(m)
         return out
@@ -4251,17 +4228,35 @@ class LaunchUI(QWidget):
         self._hl_mask = mask
         self.canvas.show_highlight(mask)
 
-    # ---------- 发缕列表 ----------
-    def _sync_hair_table(self):
-        hair = (self._cut or {}).get("hair") or []
-        self.tb_hair.blockSignals(True)
-        self.tb_hair.setRowCount(0)
-        for i, w in enumerate(hair):
-            self.tb_hair.insertRow(i)
-            it = QTableWidgetItem(f"第 {i + 1} 缕")
-            it.setData(Qt.ItemDataRole.UserRole, i)
+    # ---------- 飘动区域列表（头发 + 衣服共用） ----------
+    # 方向下拉的取值：None = 沿发丝/衣摆法线（原来的行为），其余为屏幕角度
+    _DIR_CHOICES = ((None, "默认"), (0.0, "→"), (45.0, "↗"), (90.0, "↑"),
+                    (135.0, "↖"), (180.0, "←"), (225.0, "↙"),
+                    (270.0, "↓"), (315.0, "↘"))
+
+    def _sync_sway_table(self):
+        """头发与衣服合并到同一张表：类型 | 区域 | 方向 | 幅度 | 末端。
+
+        行内记住 (kind, 下标)；方向与幅度是逐区域参数，直接写回 wisp 字典。
+        """
+        st = self._cut or {}
+        rows = []
+        for kind, unit in (("hair", "缕"), ("cloth", "块")):
+            for i, w in enumerate(st.get(kind) or []):
+                rows.append((kind, i, unit, w))
+        self.tb_sway.blockSignals(True)
+        self.tb_sway.setRowCount(0)
+        for r, (kind, i, unit, w) in enumerate(rows):
+            self.tb_sway.insertRow(r)
+            it = QTableWidgetItem("头发" if kind == "hair" else "衣服")
+            it.setData(Qt.ItemDataRole.UserRole, (kind, i))
             it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tb_hair.setItem(i, 0, it)
+            self.tb_sway.setItem(r, 0, it)
+            it1 = QTableWidgetItem(f"第 {i + 1} {unit}")
+            it1.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tb_sway.setItem(r, 1, it1)
+            self.tb_sway.setCellWidget(r, 2, self._dir_cell(kind, i, w))
+            self.tb_sway.setCellWidget(r, 3, self._amp_cell(kind, i, w.get("amp")))
             try:
                 tip = w.get("tip") or (0, 0)
                 txt = f"{float(tip[0]):.0f}, {float(tip[1]):.0f}"
@@ -4269,101 +4264,219 @@ class LaunchUI(QWidget):
                 txt = "-"
             it2 = QTableWidgetItem(txt)
             it2.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tb_hair.setItem(i, 1, it2)
-        self.tb_hair.blockSignals(False)
+            self.tb_sway.setItem(r, 4, it2)
+        self.tb_sway.blockSignals(False)
         self._highlight_selection()
 
-    def _remove_hair_rows(self):
+    def _dir_cell(self, kind: str, i: int, w: dict):
+        """摆动轴下拉；与丝长太近时行内亮出 ⊥，表示实际按垂直分量摆。"""
+        cb = ClickComboBox()
+        for val, txt in self._DIR_CHOICES:
+            cb.addItem(txt, val)
+        cur = w.get("dir")
+        try:
+            cur = None if cur is None else float(cur) % 360.0
+        except (TypeError, ValueError):
+            cur = None
+        pick = 0
+        for k, (val, _txt) in enumerate(self._DIR_CHOICES):
+            if (val is None and cur is None) or (
+                    val is not None and cur is not None and abs(val - cur) < 1e-6):
+                pick = k
+                break
+        cb.setCurrentIndex(pick)
+        cb.currentIndexChanged.connect(
+            lambda _=0, k=kind, n=i, c=cb: self._set_sway_dir(k, n, c.currentData()))
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(cb, 1)
+        hint = QLabel("⊥")
+        hint.setFixedWidth(12)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("color:#c9854f;font-weight:700;")
+        hint.setToolTip("所选摆动轴与发丝 / 衣摆接近平行，实际按垂直丝长的轴摆动；"
+                        "保存的仍是你选的那个方向")
+        hint.setVisible(self._axis_projected(w))
+        lay.addWidget(hint, 0)
+        return box
+
+    @staticmethod
+    def _axis_projected(w: dict) -> bool:
+        """与 anim.sway_axis 同一判据：方向与丝长夹角 < 25° 时会被投影。"""
+        try:
+            d = w.get("dir")
+            if d is None:
+                return False
+            px, py = w["pivot"]
+            tx, ty = w["tip"]
+            dx, dy = float(tx) - float(px), float(ty) - float(py)
+            n = math.hypot(dx, dy)
+            if n < 1e-6:
+                return False
+            return sway_axis(float(d), dx / n, dy / n)[1]
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def _amp_cell(self, kind: str, i: int, amp):
+        """每行一个拖动条（0~3.0×）+ 数值；拖动只刷新预览，松手才落盘。"""
+        try:
+            amp = min(3.0, max(0.0, float(amp)))
+        except (TypeError, ValueError):
+            amp = 1.0
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(2, 0, 4, 0)
+        lay.setSpacing(4)
+        sl = ClickSlider(Qt.Orientation.Horizontal)
+        sl.setRange(0, 300)
+        sl.setValue(int(round(amp * 100)))
+        sl.setToolTip("这块区域自己的摆动幅度：0 = 不动，1.0× = 标准，3.0× = 最飘")
+        lb = QLabel(f"{amp:.1f}×")
+        lb.setFixedWidth(34)
+        lb.setStyleSheet("color:#5a6b7d;font-size:11px;")
+        lay.addWidget(sl, 1)
+        lay.addWidget(lb, 0)
+        sl.valueChanged.connect(
+            lambda v, k=kind, n=i, l=lb: self._set_sway_amp(k, n, v, l))
+        sl.sliderReleased.connect(lambda k=kind: self._save_sway_meta(k))
+        return box
+
+    def _set_sway_amp(self, kind: str, i: int, raw: int, label: QLabel):
+        amp = round(max(0.0, min(3.0, raw / 100.0)), 2)
+        label.setText(f"{amp:.1f}×")
+        items = (self._cut or {}).get(kind) or []
+        if not (0 <= i < len(items)):
+            return
+        items[i]["amp"] = amp
+        self._queue_sway_preview()
+        self._queue_sway_save(kind)
+
+    def _set_sway_dir(self, kind: str, i: int, deg):
+        items = (self._cut or {}).get(kind) or []
+        if not (0 <= i < len(items)):
+            return
+        items[i]["dir"] = None if deg is None else float(deg)
+        self._queue_sway_preview()
+        self._queue_sway_save(kind)
+
+    def _queue_sway_preview(self):
+        """拖动幅度时合并刷新：80ms 内只重建一次画布上的桌宠。"""
+        if getattr(self, "_sway_preview_pending", False):
+            return
+        self._sway_preview_pending = True
+        QTimer.singleShot(80, self._apply_sway_preview)
+
+    def _sway_params(self, kind: str) -> list:
+        """逐区域的 (amp, dir)，过滤规则与 _pet_engine 构位移场时保持一致。"""
+        st = self._cut or {}
+        x0, y0, x1, y1 = st["box"]
+        out = []
+        for it in st.get(kind) or []:
+            if not it["mask"][y0:y1, x0:x1].any():
+                continue
+            d = it.get("dir")
+            out.append((float(it.get("amp", 1.0)),
+                        None if d is None else float(d)))
+        return out
+
+    def _apply_sway_preview(self):
+        """只改幅度 / 方向时走轻量路径：就地改参数 + 立刻重画一帧。
+
+        以前是清缓存重建整个渲染引擎（权重、距离场、眨眼贴片全部重算），
+        拖动幅度条时每 80ms 重建一次，必然卡；现在权重全部复用。
+        """
+        self._sway_preview_pending = False
+        if self._running or not self._cut:
+            return
+        eng = getattr(self, "_pet_engine_cache", None)
+        if eng is not None and hasattr(eng, "set_sway_params"):
+            eng.set_sway_params(self._sway_params("hair"),
+                                self._sway_params("cloth"))
+            self.canvas.refresh_pet()
+            return
+        # 还没建过引擎（例如刚打开面板）：退回完整重建
+        self._pet_key = None
+        self._show_pet(animate=True)
+
+    def _queue_sway_save(self, kind: str):
+        """幅度拖动时合并落盘：停手 600ms 后才写一次，不在拖动途中刷盘。"""
+        pending = getattr(self, "_sway_save_pending", None)
+        if pending is None:
+            pending = self._sway_save_pending = set()
+        pending.add(kind)
+        if getattr(self, "_sway_save_timer", None) is None:
+            self._sway_save_timer = QTimer(self)
+            self._sway_save_timer.setSingleShot(True)
+            self._sway_save_timer.timeout.connect(self._flush_sway_save)
+        self._sway_save_timer.start(600)
+
+    def _flush_sway_save(self):
+        kinds = getattr(self, "_sway_save_pending", set())
+        self._sway_save_pending = set()
+        for kind in kinds:
+            self._save_sway_meta(kind)
+
+    def _save_sway_meta(self, kind: str):
+        """只改幅度/方向时落盘：不重建表格、不刷日志，避免打断拖动。"""
         if not self._cut:
             return
-        rows = sorted({i.row() for i in self.tb_hair.selectedIndexes()},
-                      reverse=True)
-        if not rows:
-            self._log("[提示] 先选中要删除的发缕")
-            return
-        hair = list(self._cut.get("hair") or [])
-        for r in rows:
-            if 0 <= r < len(hair):
-                hair.pop(r)
-        self._apply_hair(hair)
-
-    def _clear_hair_rows(self):
-        if not self._cut:
-            return
-        self._apply_hair([])
-
-    def _apply_hair(self, hair: list):
-        """删掉/清空发缕后重新落盘，并刷新桌宠预览（已生成素材不受影响）。"""
         st = self._cut
-        st["hair"] = hair
+        items = st.get(kind) or []
         x0, y0, x1, y1 = st["box"]
         try:
             launch.save_hair_polys(st["source_dir"], st["stem"],
-                                   (x1 - x0, y1 - y0), hair, (x0, y0),
-                                   force=True)
+                                   (x1 - x0, y1 - y0), items, (x0, y0),
+                                   force=True, kind=kind, masks_dirty=False)
         except Exception as exc:      # noqa: BLE001  （落盘失败不该打断界面）
-            self._log(f"[错误] 发缕标注保存失败：{exc}")
-        self._log(f"    ✓ 发缕已更新（{len(hair)} 缕）" if hair
-                  else "    ✓ 发缕已清空，重新生成的桌宠不再做头发飘动")
-        self._sync_hair_table()
-        if not self._running:
-            self._show_pet(animate=True)
+            self._log(f"[错误] 飘动幅度 / 方向保存失败：{exc}")
 
-    # ---------- 衣物列表 ----------
-    def _sync_cloth_table(self):
-        cloth = (self._cut or {}).get("cloth") or []
-        self.tb_cloth.blockSignals(True)
-        self.tb_cloth.setRowCount(0)
-        for i, w in enumerate(cloth):
-            self.tb_cloth.insertRow(i)
-            it = QTableWidgetItem(f"第 {i + 1} 块")
-            it.setData(Qt.ItemDataRole.UserRole, i)
-            it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tb_cloth.setItem(i, 0, it)
-            try:
-                tip = w.get("tip") or (0, 0)
-                txt = f"{float(tip[0]):.0f}, {float(tip[1]):.0f}"
-            except (TypeError, ValueError, IndexError):
-                txt = "-"
-            it2 = QTableWidgetItem(txt)
-            it2.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tb_cloth.setItem(i, 1, it2)
-        self.tb_cloth.blockSignals(False)
-        self._highlight_selection()
-
-    def _remove_cloth_rows(self):
+    def _remove_sway_rows(self):
         if not self._cut:
             return
-        rows = sorted({i.row() for i in self.tb_cloth.selectedIndexes()},
-                      reverse=True)
-        if not rows:
-            self._log("[提示] 先选中要删除的衣物")
+        picked: dict[str, list[int]] = {}
+        for r in {i.row() for i in self.tb_sway.selectedIndexes()}:
+            it = self.tb_sway.item(r, 0)
+            if it is None:
+                continue
+            kind, i = it.data(Qt.ItemDataRole.UserRole) or (None, None)
+            if kind is not None:
+                picked.setdefault(kind, []).append(i)
+        if not picked:
+            self._log("[提示] 先选中要删除的飘动区域")
             return
-        cloth = list(self._cut.get("cloth") or [])
-        for r in rows:
-            if 0 <= r < len(cloth):
-                cloth.pop(r)
-        self._apply_cloth(cloth)
+        for kind, idxs in picked.items():
+            items = list(self._cut.get(kind) or [])
+            for i in sorted(set(idxs), reverse=True):
+                if 0 <= i < len(items):
+                    items.pop(i)
+            self._apply_sway(kind, items)
 
-    def _clear_cloth_rows(self):
+    def _clear_sway_rows(self):
         if not self._cut:
             return
-        self._apply_cloth([])
+        for kind in ("hair", "cloth"):
+            if self._cut.get(kind):
+                self._apply_sway(kind, [])
 
-    def _apply_cloth(self, cloth: list):
-        """删掉/清空衣物后重新落盘，并刷新桌宠预览（已生成素材不受影响）。"""
+    def _apply_sway(self, kind: str, items: list):
+        """删掉/清空某一类飘动区域后重新落盘，并刷新桌宠预览（已生成素材不受影响）。"""
         st = self._cut
-        st["cloth"] = cloth
+        st[kind] = items
+        name = "发缕" if kind == "hair" else "衣物"
+        unit = "缕" if kind == "hair" else "块"
         x0, y0, x1, y1 = st["box"]
         try:
             launch.save_hair_polys(st["source_dir"], st["stem"],
-                                   (x1 - x0, y1 - y0), cloth, (x0, y0),
-                                   force=True, kind="cloth")
+                                   (x1 - x0, y1 - y0), items, (x0, y0),
+                                   force=True, kind=kind)
         except Exception as exc:      # noqa: BLE001  （落盘失败不该打断界面）
-            self._log(f"[错误] 衣物标注保存失败：{exc}")
-        self._log(f"    ✓ 衣物已更新（{len(cloth)} 块）" if cloth
-                  else "    ✓ 衣物已清空，重新生成的桌宠不再做衣摆飘动")
-        self._sync_cloth_table()
+            self._log(f"[错误] {name}标注保存失败：{exc}")
+        self._log(f"    ✓ {name}已更新（{len(items)} {unit}）" if items
+                  else f"    ✓ {name}已清空，重新生成的桌宠不再做"
+                       f"{'头发' if kind == 'hair' else '衣摆'}飘动")
+        self._sync_sway_table()
         if not self._running:
             self._show_pet(animate=True)
 
@@ -4715,7 +4828,7 @@ class LaunchUI(QWidget):
             self._rebuild_anim(force=True)
 
     def _anim_params(self) -> dict:
-        """设置里的「动作参数」：头发速度/摆幅/回弹、身体摇摆。"""
+        """设置里的「动作参数」：飘动速度/摆幅（头发/衣物共用）、回弹、身体摇摆。"""
         def val(name, default):
             w = getattr(self, name, None)
             try:
@@ -4771,7 +4884,11 @@ class LaunchUI(QWidget):
                 continue
             wisps.append(HairWisp(m.astype(bool),
                                   (it["pivot"][0] - x0, it["pivot"][1] - y0),
-                                  (it["tip"][0] - x0, it["tip"][1] - y0)))
+                                  (it["tip"][0] - x0, it["tip"][1] - y0),
+                                  float(it.get("amp", 1.0)),
+                                  None if it.get("dir") is None
+                                  else float(it["dir"]),
+                                  float(it.get("bias", 0.0))))
         cloth_wisps = []
         for it in cloth:
             m = it["mask"][y0:y1, x0:x1]
@@ -4780,7 +4897,10 @@ class LaunchUI(QWidget):
             cloth_wisps.append(HairWisp(
                 m.astype(bool),
                 (it["pivot"][0] - x0, it["pivot"][1] - y0),
-                (it["tip"][0] - x0, it["tip"][1] - y0)))
+                (it["tip"][0] - x0, it["tip"][1] - y0),
+                float(it.get("amp", 1.0)),
+                None if it.get("dir") is None else float(it["dir"]),
+                float(it.get("bias", 0.0))))
         eng = PetPreview(rgba, self._eyes_crop(sockets), su, levels, wisps,
                          blinks, cycle, gaze_on=self.ck_gaze.isChecked(),
                          hair_speed=anim["hair_speed"], hair_amp=anim["hair_amp"],
@@ -4836,7 +4956,7 @@ class LaunchUI(QWidget):
         """跑任务时禁用按钮；抠图完成后才放开选做步骤与生成。"""
         cut = self._cut is not None
         self.btn_start.setEnabled(not busy)
-        for b in (self.btn_eyes, self.btn_hair, self.btn_cloth):
+        for b in (self.btn_eyes, self.btn_sway):
             b.setEnabled(not busy and cut)
         self.btn_table.setEnabled(not busy and cut)
         self.btn_build.setEnabled(not busy and cut)
@@ -4987,8 +5107,7 @@ class LaunchUI(QWidget):
                              "cache": cache, "sockets": [], "levels": [],
                              "hair": [], "cloth": []}
                 self._hl_mask = None   # 新图没有选区，别把上一张的绿光带过来
-                self._sync_hair_table()
-                self._sync_cloth_table()
+                self._sync_sway_table()
                 self._save_source()
                 self._show_cutout(show_mask=True, show_board=True)
                 act = self._run_preview(
@@ -5122,7 +5241,10 @@ class LaunchUI(QWidget):
             wisps.append(HairWisp(
                 m.astype(bool),
                 (it["pivot"][0] - x0, it["pivot"][1] - y0),
-                (it["tip"][0] - x0, it["tip"][1] - y0)))
+                (it["tip"][0] - x0, it["tip"][1] - y0),
+                float(it.get("amp", 1.0)),
+                None if it.get("dir") is None else float(it["dir"]),
+                float(it.get("bias", 0.0))))
         if not wisps:
             return self._frames_cut()
         h, w = rgba.shape[:2]
@@ -5139,13 +5261,14 @@ class LaunchUI(QWidget):
         if self._cut:
             self._run_task(self._eyes_flow)
 
-    def _annotate_hair(self):
-        if self._cut:
-            self._run_task(self._hair_flow)
-
-    def _annotate_cloth(self):
-        if self._cut:
+    def _annotate_sway(self):
+        """一个入口标注飘动区域：按上方「类型」进头发或衣服的同一套流程。"""
+        if not self._cut:
+            return
+        if self.cb_sway_type.currentData() == "cloth":
             self._run_task(self._cloth_flow)
+        else:
+            self._run_task(self._hair_flow)
 
     def _build(self):
         if self._cut:
@@ -5277,7 +5400,7 @@ class LaunchUI(QWidget):
                 raise Cancelled()
             if res is SKIP:
                 print("    未画发缕，保留已有标注")
-                self._sync_hair_table()
+                self._sync_sway_table()
                 self._show_cutout()
                 return
             wisps = list(res)
@@ -5295,7 +5418,7 @@ class LaunchUI(QWidget):
                     wisps, (x0, y0), force=True)
                 print(f"    ✓ 发缕标注 {hair_path.name}（{len(wisps)} 缕，"
                       f"首点=发根，外轮廓发丝按 ±9° 摆）")
-                self._sync_hair_table()
+                self._sync_sway_table()
                 self._show_cutout()
                 return
             if act is None:
@@ -5324,7 +5447,7 @@ class LaunchUI(QWidget):
                 raise Cancelled()
             if res is SKIP:
                 print("    未画衣物，保留已有标注")
-                self._sync_cloth_table()
+                self._sync_sway_table()
                 self._show_cutout()
                 return
             wisps = list(res)
@@ -5342,7 +5465,7 @@ class LaunchUI(QWidget):
                     wisps, (x0, y0), force=True, kind="cloth")
                 print(f"    ✓ 衣物标注 {cloth_path.name}（{len(wisps)} 块，"
                       "与头发共用飘动物理）")
-                self._sync_cloth_table()
+                self._sync_sway_table()
                 self._show_cutout()
                 return
             if act is None:

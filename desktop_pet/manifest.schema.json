@@ -43,6 +43,29 @@
         "ellipse": {"type": "object", "description": "可选：v1 椭圆外接框，旧渲染路径兼容用"}
       }
     },
+    "swayWisp": {
+      "type": "object",
+      "properties": {
+        "mask": {"type": "string", "description": "该区域的灰度 mask 文件"},
+        "pivot": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2,
+                  "description": "固定端（发根 / 衣摆挂点），裁切图坐标"},
+        "tip": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2,
+                "description": "静止时的末端，用于算摆动力学方向"},
+        "amp": {
+          "type": "number", "minimum": 0, "maximum": 3, "default": 1.0,
+          "description": "逐区域幅度倍率；0 = 该区域不动，缺省 1.0"
+        },
+        "dir": {
+          "type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 360,
+          "default": null,
+          "description": "摆动轴（往返轴），屏幕角度 0=右 90=上 180=左 270=下；null = 沿发丝/衣摆法线"
+        },
+        "bias": {
+          "type": "number", "minimum": -45, "maximum": 45, "default": 0,
+          "description": "角度偏置（度）：angle = A·sin(ωt) + bias，走同一个 angle 通道"
+        }
+      }
+    },
     "timeline": {
       "type": "object",
       "properties": {
@@ -105,7 +128,12 @@
           "items": {"type": "integer"},
           "description": "烘焙时记录的每只眼眶连通域数；≠1 表示标注里混进了装饰件"
         },
-        "hair": {"type": "array", "items": {"type": "object"}},
+        "hair": {"type": "array", "items": {"$ref": "#/$defs/swayWisp"}},
+        "cloth": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/swayWisp"},
+          "description": "衣服 / 小物件的飘动区域，与 hair 共用同一套逐区域参数"
+        },
         "provenance": {
           "type": "object",
           "properties": {

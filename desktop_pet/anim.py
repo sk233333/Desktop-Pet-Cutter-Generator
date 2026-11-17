@@ -29,6 +29,8 @@ import numpy as np
 from PIL import Image
 
 GOLDEN_ANGLE = 2.399963        # 黄金角：让相邻发束的相位尽量错开
+SWAY_AXIS_PARALLEL_DEG = 25.0  # 方向与丝长夹角小于它 → 自动取垂直分量，避免拉长/压缩
+MAX_SWAY_SHIFT_PX = 14.0       # 单块区域最终像素位移上限（抑制 3×3=9× 极端拉伸）
 
 
 @dataclass
@@ -57,11 +59,18 @@ class HairWisp:
 
     mask 决定哪些像素参与摆动；pivot 是发根（旋转中心，画多边形时点的第一个顶点）；
     tip 是静止时的发梢，用来算发缕长度和摆动的力学方向。
+
+    amp 是这块区域自己的幅度倍率（0 = 不动，1 = 标准，3 = 三倍）；
+    dir 是摆动轴（往返轴，屏幕角度：0=右、90=上、180=左、270=下），None = 沿发丝法线；
+    bias 是角度偏置（度），走同一个 angle 通道：angle = A·sin(ωt) + bias。
     """
 
     mask: np.ndarray
     pivot: tuple[float, float]
     tip: tuple[float, float]
+    amp: float = 1.0
+    dir: float | None = None
+    bias: float = 0.0
 
 
 def hair_from_dicts(items: list[dict] | None,
@@ -79,10 +88,64 @@ def hair_from_dicts(items: list[dict] | None,
                 continue
             pivot = [float(v) for v in it["pivot"]]
             tip = [float(v) for v in it["tip"]]
-            wisps.append(HairWisp(m > 127, (pivot[0], pivot[1]), (tip[0], tip[1])))
+            try:
+                amp = min(3.0, max(0.0, float(it.get("amp", 1.0))))
+            except (TypeError, ValueError):
+                amp = 1.0
+            d = it.get("dir")
+            try:
+                d = None if d is None else float(d) % 360.0
+            except (TypeError, ValueError):
+                d = None
+            try:
+                bias = min(45.0, max(-45.0, float(it.get("bias", 0.0))))
+            except (TypeError, ValueError):
+                bias = 0.0
+            wisps.append(HairWisp(m > 127, (pivot[0], pivot[1]),
+                                  (tip[0], tip[1]), amp, d, bias))
         except (KeyError, TypeError, ValueError, IndexError, OSError):
             continue
     return wisps
+
+
+def sway_axis(dir_deg: float, ux: float, uy: float) -> tuple[tuple[float, float], bool]:
+    """把用户选的摆动方向解析成位移轴。
+
+    方向与丝长夹角小于 25° 时，位移轴改用垂直丝长的分量：否则位移沿丝长方向，
+    重采样看起来是拉长/压缩而不是摆动。返回 ((nx, ny), 是否做了垂直投影)。
+    投影后仍保留用户所选的那一侧的符号，写回的 `dir` 不变。
+    """
+    ang = math.radians(float(dir_deg))
+    dx, dy = math.cos(ang), -math.sin(ang)
+    dot = max(-1.0, min(1.0, dx * ux + dy * uy))
+    if math.degrees(math.acos(min(1.0, abs(dot)))) < SWAY_AXIS_PARALLEL_DEG:
+        px, py = dx - dot * ux, dy - dot * uy
+        n = math.hypot(px, py)
+        if n > 1e-6:
+            return (px / n, py / n), True
+        return (-uy, ux), True
+    return (dx, dy), False
+
+
+def inward_factor(s, target: float) -> float:
+    """向身体内侧的目标摆幅打 6 折；外摆不变。
+
+    默认轴沿用原来的启发式（out_dir × tip_dir）；自定义轴按位移轴在水平方向
+    指向身体内侧的分量判定，避免之间的发丝/衣摆穿进脸和躯干。
+    外缘临透明的发丝（free）不做收缩，保持原来的例外。
+    """
+    if s.free:
+        return target
+    if s.custom:
+        inward = -s.out_dir
+        proj = s.normal[0] * inward
+        if proj != 0 and target * proj > 0:
+            return target * 0.6
+        return target
+    sign = -s.out_dir * s.tip_dir
+    if target * sign < 0:
+        return target * 0.6
+    return target
 
 
 def group_number(group) -> int:
@@ -2083,7 +2146,14 @@ class _Wisp:
     amp_max: float                   # 发梢位移硬上限（显示像素）
     weight: np.ndarray               # 发根 0 -> 发梢 1 的渐变权重（0..1）
     bbox: tuple[int, int, int, int] = (0, 0, 0, 0)  # 含最大移动余量的包围盒
+    gain: float = 1.0                # 这块区域自己的幅度倍率（0 = 不动）
+    custom: bool = False             # 是否用了自定义摆动方向（不用发丝法线）
+    src_index: int = 0               # 对应输入 wisps 里的下标（就地改参数用）
+    normal_default: tuple[float, float] = (0.0, 0.0)  # 原来的发丝法线
+    projected: bool = False          # 所选方向与丝长太近，已自动取垂直分量
+    bias: float = 0.0                # 角度偏置（度），angle = 振荡 + bias
     angle: float = 0.0
+    osc: float = 0.0                 # 振荡分量（不含 bias）
     omega: float = 0.0
     phase: float = 0.0
     stiff: float = 26.0
@@ -2134,7 +2204,19 @@ class HairField:
             dx, dy = tip[0] - pivot[0], tip[1] - pivot[1]
             length = max(6.0, float(math.hypot(dx, dy)))
             ux, uy = dx / length, dy / length
-            normal = (-uy, ux)
+            orig_normal = (-uy, ux)
+            normal = orig_normal
+            # 逐区域幅度 / 方向：方向用屏幕角度（0=右、90=上），None 保持发丝法线
+            gain = min(3.0, max(0.0, float(getattr(w, "amp", 1.0))))
+            d = getattr(w, "dir", None)
+            custom = d is not None
+            projected = False
+            if custom:
+                normal, projected = sway_axis(float(d), ux, uy)
+            try:
+                bias = min(45.0, max(-45.0, float(getattr(w, "bias", 0.0))))
+            except (TypeError, ValueError):
+                bias = 0.0
             free = is_free_hair(alpha, w.mask, pivot=w.pivot)
             # 发梢位移取发缕长度的 14%（外缘）/ 10%（压在身上），绝对上限见括号
             amp_max = (min(8.0, 0.14 * length) if free
@@ -2160,14 +2242,18 @@ class HairField:
             # 被剪切，看起来像一团污渍，而不是摆动
             gate = np.clip(dist / 2.0, 0.0, 1.0)
             gate = cv2.GaussianBlur(gate, (0, 0), 0.8)
-            weight = np.zeros((height, width), np.float32)
-            weight[by0:by1, bx0:bx1] = cv2.GaussianBlur(
-                (t ** 1.4) * gate, (0, 0), 1.0)
+            # 权重裁剪到包围盒存储：1024² 下单缕从 4MB 降到实际占用，
+            # 多段衣服叠加时不再常驻一堆整图 float 数组
+            weight = cv2.GaussianBlur(
+                (t ** 1.4) * gate, (0, 0), 1.0).astype(np.float32)
             bbox = (bx0, by0, bx1, by1)
             cx = float(xs.mean())
             self.items.append(_Wisp(
                 pivot=pivot, bbox=bbox, normal=normal,
                 length=length, amp_max=amp_max, weight=weight,
+                gain=gain, custom=custom,
+                src_index=i, normal_default=orig_normal,
+                projected=projected, bias=bias,
                 x_dir=1.0 if dx >= 0 else -1.0,
                 tip_dir=1.0 if dy >= 0 else -1.0,
                 free=free, angle_max=angle_max,
@@ -2187,13 +2273,21 @@ class HairField:
             s.omega += -s.x_dir * strength
 
     def step(self, dt: float, vx: float, tilt: float):
-        """推进角度：目标 = 微风 + 拖拽滞后 + 身体摇摆滞后，二阶弹簧逼近。"""
+        """推进角度：目标 = 微风 + 拖拽滞后 + 身体摇摆滞后，二阶弹簧逼近。
+
+        弹簧只推进振荡分量 `osc`，`angle = osc + bias` 再交给 swing_all，
+        因此 bias 不改变平衡点，bias=0 时逐帧结果与旧实现一致。
+        """
         if not self.items:
             return
         self.phase += dt * 2.6 * self.wind_speed   # 微风约 2.4 秒一个周期（≈0.41Hz）
         vnorm = max(-1.0, min(1.0, vx / 620.0))
         for s in self.items:
-            lim = s.angle_max * self.amp
+            lim = s.angle_max * self.amp * s.gain
+            # 最终像素位移合并上限：逐区域 3× 叠运行时 3× 也不会拉到离谱
+            cap = math.degrees(math.asin(
+                min(0.999, MAX_SWAY_SHIFT_PX / max(6.0, s.length))))
+            lim = min(lim, cap)
             # 微风按各自上限取比例：短发上限本来就小，用固定角速度会几乎看不出动。
             # 剪切位移不会空出原位，外缘发缕可以放心用接近满幅，待机也能看出摆动
             wind = lim * (0.95 if s.free else 0.9) \
@@ -2202,71 +2296,108 @@ class HairField:
             target = s.tip_dir * (wind + lim * 0.85 * vnorm) \
                 - 0.35 * tilt
             target = max(-lim, min(lim, target))
-            if not s.free:
-                # 压在身上的发丝：允许往复摆动，但往里（可能盖住脸）的幅度先收一半
-                sign = -s.out_dir * s.tip_dir
-                if target * sign < 0:
-                    target *= 0.6
-            acc = ((target - s.angle) * s.stiff * self.stiffness
+            target = inward_factor(s, target)
+            acc = ((target - s.osc) * s.stiff * self.stiffness
                    - s.omega * s.damp * self.damping)
             s.omega += acc * dt
-            s.angle += s.omega * dt
-            if s.angle > lim:
-                s.angle, s.omega = lim, 0.0
-            elif s.angle < -lim:
-                s.angle, s.omega = -lim, 0.0
+            s.osc += s.omega * dt
+            if s.osc > lim:
+                s.osc, s.omega = lim, 0.0
+            elif s.osc < -lim:
+                s.osc, s.omega = -lim, 0.0
+            s.angle = max(-cap, min(cap, s.osc + s.bias))
+
+    def apply_params(self, params: list[tuple[float, float | None]]) -> None:
+        """就地更新逐区域幅度 / 方向，不重建位移场。
+
+        params 与构造时的 wisps 一一对应（(amp, dir)，dir 为 None = 发丝法线）。
+        拖动幅度条时只改这里的几个浮点数，权重、距离场、包围盒全部复用，
+        所以每帧都几乎零成本；增删区域才需要重建整个 HairField。
+        """
+        for s in self.items:
+            i = s.src_index
+            if not (0 <= i < len(params)):
+                continue
+            amp, d = params[i]
+            try:
+                s.gain = min(3.0, max(0.0, float(amp)))
+            except (TypeError, ValueError):
+                s.gain = 1.0
+            s.custom = d is not None
+            s.projected = False
+            s.normal = s.normal_default
+            if s.custom:
+                try:
+                    # normal_default = (-uy, ux) → 反推出丝长方向
+                    ux, uy = s.normal_default[1], -s.normal_default[0]
+                    s.normal, s.projected = sway_axis(float(d), ux, uy)
+                except (TypeError, ValueError):
+                    s.custom = False
 
     def swing(self, rgba: np.ndarray) -> np.ndarray:
-        """按当前摆角做渐变剪切：位移场只改变采样位置，整图只采样一次。
+        """单场入口（编辑器预览仍用它）；多场请用 swing_all 合成一次。"""
+        return swing_all((self,), rgba)
 
-        重影的根源是「画了两遍」——把原位置的发丝抠出来、移到新位置、再叠回去，
-        同一根发丝就会同时出现在两个位置（羽化越宽、重影带越宽）。这里不做任何
-        alpha 混合：所有发缕的位移量先累加成一个位移场，再对预乘 alpha 的图做
-        一次 remap。位移场在发缕边界归零，边界外恒为 0，所以边界像素原地不动，
-        既不会空出分界线，也不会留下第二份像素。区外像素逐比特保留。
-        """
-        if not self.items:
-            return rgba
-        if all(abs(s.angle) < 0.02 for s in self.items):
-            return rgba
-        h, w = rgba.shape[:2]
-        x0 = max(0, min(s.bbox[0] for s in self.items))
-        y0 = max(0, min(s.bbox[1] for s in self.items))
-        x1 = min(w, max(s.bbox[2] for s in self.items))
-        y1 = min(h, max(s.bbox[3] for s in self.items))
-        if x1 <= x0 or y1 <= y0:
-            return rgba
-        sub = rgba[y0:y1, x0:x1]
-        sh, sw = sub.shape[:2]
-        alpha = sub[..., 3:4].astype(np.float32) * (1.0 / 255.0)
-        premul = np.dstack([sub[..., :3].astype(np.float32) * alpha, alpha])
 
-        # 各发缕的位移量叠加成一个场，全程只做一次重采样
-        shift_x = np.zeros((sh, sw), np.float32)
-        shift_y = np.zeros((sh, sw), np.float32)
-        for s in self.items:
-            amp = s.length * math.sin(math.radians(s.angle))
-            if abs(amp) < 0.01:
-                continue
-            field = s.weight[y0:y1, x0:x1]
-            shift_x -= field * (s.normal[0] * amp)
-            shift_y -= field * (s.normal[1] * amp)
-        touched = np.hypot(shift_x, shift_y) > 0.02
-        if not touched.any():
-            return rgba
+def swing_all(fields, rgba: np.ndarray) -> np.ndarray:
+    """把多个场（头发 / 衣服）的发缕合成**一份**位移场，只重采样一次。
 
-        yy, xx = np.mgrid[0:sh, 0:sw].astype(np.float32)
-        moved = cv2.remap(premul, xx + shift_x, yy + shift_y,
-                          cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        a_out = np.clip(moved[..., 3], 0.0, 1.0)
-        safe = np.maximum(a_out, 1e-4)[..., None]
-        rgb_out = np.clip(moved[..., :3] / safe, 0, 255).astype(np.uint8)
+    以前逐场调用 `swing()` 时，头发和衣服各做一遍「整图 remap + 整图 copy」，
+    衣服拆成几段就再翻几倍——这是多设几段衣服动作就卡的主因。合并后仍然
+    遵守原有约定：整图只采样一次、位移场在发缕边界归零、区外像素逐比特保留。
+    """
+    items = [s for f in (fields or ()) if f is not None
+             for s in f.items if abs(s.angle) >= 0.02]
+    if not items:
+        return rgba
+    h, w = rgba.shape[:2]
+    x0 = max(0, min(s.bbox[0] for s in items))
+    y0 = max(0, min(s.bbox[1] for s in items))
+    x1 = min(w, max(s.bbox[2] for s in items))
+    y1 = min(h, max(s.bbox[3] for s in items))
+    if x1 <= x0 or y1 <= y0:
+        return rgba
+    sub = rgba[y0:y1, x0:x1]
+    sh, sw = sub.shape[:2]
+    alpha = sub[..., 3:4].astype(np.float32) * (1.0 / 255.0)
+    premul = np.dstack([sub[..., :3].astype(np.float32) * alpha, alpha])
 
-        result = rgba.copy()
-        out = result[y0:y1, x0:x1]
-        out[..., :3][touched] = rgb_out[touched]
-        out[..., 3][touched] = np.clip(a_out * 255.0, 0, 255).astype(np.uint8)[touched]
-        return result
+    # 各发缕的位移量叠加成一个场，全程只做一次重采样
+    shift_x = np.zeros((sh, sw), np.float32)
+    shift_y = np.zeros((sh, sw), np.float32)
+    for s in items:
+        amp = s.length * math.sin(math.radians(s.angle))
+        if abs(amp) < 0.01:
+            continue
+        sx0, sy0, sx1, sy1 = s.bbox
+        gx0, gy0 = max(sx0, x0) - x0, max(sy0, y0) - y0
+        gx1, gy1 = min(sx1, x1) - x0, min(sy1, y1) - y0
+        if gx1 <= gx0 or gy1 <= gy0:
+            continue
+        # 权重已是裁剪存储：只取与并集包围盒相交的那一块
+        i0, j0 = max(sy0, y0) - sy0, max(sx0, x0) - sx0
+        i1, j1 = min(sy1, y1) - sy0, min(sx1, x1) - sx0
+        field = s.weight[i0:i1, j0:j1]
+        shift_x[gy0:gy1, gx0:gx1] -= field * (s.normal[0] * amp)
+        shift_y[gy0:gy1, gx0:gx1] -= field * (s.normal[1] * amp)
+    touched = np.hypot(shift_x, shift_y) > 0.02
+    if not touched.any():
+        return rgba
+
+    # 坐标用 arange 广播，避免每帧 mgrid 生成两份整块 float 网格
+    yy = np.arange(sh, dtype=np.float32)[:, None]
+    xx = np.arange(sw, dtype=np.float32)[None, :]
+    moved = cv2.remap(premul, xx + shift_x, yy + shift_y,
+                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    a_out = np.clip(moved[..., 3], 0.0, 1.0)
+    safe = np.maximum(a_out, 1e-4)[..., None]
+    rgb_out = np.clip(moved[..., :3] / safe, 0, 255).astype(np.uint8)
+
+    result = rgba.copy()
+    out = result[y0:y1, x0:x1]
+    out[..., :3][touched] = rgb_out[touched]
+    out[..., 3][touched] = np.clip(a_out * 255.0, 0, 255).astype(np.uint8)[touched]
+    return result
 
 
 def checkerboard(rgba: np.ndarray, cell: int = 12) -> np.ndarray:

@@ -44,25 +44,28 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRect, Qt, QTimer
-from PyQt6.QtGui import (QCursor, QGuiApplication, QImage, QPainter, QPixmap,
-                         QTransform)
-from PyQt6.QtWidgets import QApplication, QDialog, QLabel, QMenu, QWidget
+from PyQt6.QtCore import QPoint, QPointF, QRect, Qt, QTimer
+from PyQt6.QtGui import (QCursor, QFont, QGuiApplication, QImage, QPainter,
+                         QPixmap, QTransform)
+from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QLabel, QMenu,
+                             QPushButton, QWidget)
 
 try:
     from .anim import (HairField, PetAsset, blink_group_counts, blink_phases,
                        compose_group_blink, eye_group_bbox, gaze_frame,
-                       group_eyes, resize_rgba)
+                       group_eyes, resize_rgba, swing_all)
     from .action_bridge import ActionBridge
     from .arbiter import Arbiter, timeline_phase
     from .manifest_io import active_eye_indices, read_manifest
+    from .motion_cfg import load_motion, motion_cfg_path, save_motion
 except ImportError:  # 直接以脚本方式运行
     from anim import (HairField, PetAsset, blink_group_counts, blink_phases,
                       compose_group_blink, eye_group_bbox, gaze_frame,
-                      group_eyes, resize_rgba)
+                      group_eyes, resize_rgba, swing_all)
     from action_bridge import ActionBridge
     from arbiter import Arbiter, timeline_phase
     from manifest_io import active_eye_indices, read_manifest
+    from motion_cfg import load_motion, motion_cfg_path, save_motion
 
 
 class _ExprPort:
@@ -115,6 +118,52 @@ def to_pixmap(rgba: np.ndarray, height: int | None) -> QPixmap:
     return pm
 
 
+class _DirPad(QWidget):
+    """九宫格方向盘：点箭头即确认整体漂移方向，中间「默认」不额外整体移动。
+
+    作为 Qt.Popup 弹出，点窗口外自动关闭，不打断后续操作。
+    方向用屏幕角度记：0=右、90=上、180=左、270=下（逆时针）。
+    这是「来回摆的轴」，不是往单侧飘；与编辑器里逐区域的「摆动轴」是两个概念。
+    """
+
+    _CELLS = (
+        (0, 0, 135.0, "↖"), (0, 1, 90.0, "↑"), (0, 2, 45.0, "↗"),
+        (1, 0, 180.0, "←"), (1, 1, None, "默认"), (1, 2, 0.0, "→"),
+        (2, 0, 225.0, "↙"), (2, 1, 270.0, "↓"), (2, 2, 315.0, "↘"),
+    )
+
+    def __init__(self, current, on_pick, parent=None):
+        super().__init__(parent, Qt.WindowType.Popup
+                         | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("dirPad")
+        self.setStyleSheet(
+            "#dirPad{background:rgba(32,32,32,235);border-radius:12px;}"
+            "QPushButton{background:#3d3d3d;color:#eee;border:none;"
+            "border-radius:8px;}"
+            "QPushButton:hover{background:#555;}"
+            "QPushButton:checked{background:#e0a040;color:#222;}")
+        lay = QGridLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(4)
+        for r, c, deg, text in self._CELLS:
+            b = QPushButton(text)
+            b.setFixedSize(42, 42)
+            b.setCheckable(True)
+            b.setToolTip("整体漂移方向：沿这个轴来回平移，不是往单侧飘")
+            b.setChecked(deg == current if current is not None else deg is None)
+            f = b.font()
+            f.setPointSize(9 if deg is None else 16)
+            b.setFont(f)
+            b.clicked.connect(lambda _=False, d=deg: self._pick(d, on_pick))
+            lay.addWidget(b, r, c)
+
+    def _pick(self, deg, on_pick):
+        on_pick(deg)
+        self.close()
+
+
 class PetWindow(QWidget):
     def __init__(self, asset: PetAsset, height: int | None,
                  fps: int = 24, blink: bool = True, animate: bool = True,
@@ -154,6 +203,9 @@ class PetWindow(QWidget):
         self.gaze_cache: dict[tuple[int, int], QPixmap] = {}
         # 头发摆动要与眨眼/视线帧合成，这里缓存显示尺寸的 RGBA
         self.gaze_rgba_cache: dict[tuple[int, int], np.ndarray] = {}
+        # 摆动帧缓存：只保留上一帧（源帧标识 + 各发缕角度 + 成品）。
+        # 角度变化不足 0.4° 时直接复用，避免每帧重采样与 QImage 转换
+        self._swing_cache: tuple | None = None
         self.blink_rgba: list[np.ndarray] = []
         self.gaze_vec = [0.0, 0.0]     # 缓动后的虹膜偏移（素材像素）
         self.gaze_max = 3.0
@@ -189,6 +241,10 @@ class PetWindow(QWidget):
         self._expr_rgba: dict[str, np.ndarray] = {}
         self._expr_pixmaps: dict[str, QPixmap] = {}
 
+        # 摆动幅度 / 整体漂移方向：右键菜单可调（幅度 0 = 静止），按窗口实例生效；
+        # 多只共享同一 PetAsset 时也不会互相影响，且不写回素材 manifest；
+        # 配置按 SKU 分开记忆（motion.json 的 skus[<sku>]）
+        self.motion_scale, self.motion_dir = self._load_motion_cfg()
         self._rebuild(self.initial_height)
 
         # 本机动作桥：右键可列动作，双击按绑定触发；没有配置时完全静默
@@ -232,6 +288,7 @@ class PetWindow(QWidget):
         self.base = to_pixmap(self.asset.rgba, height)
         self._expr_rgba.clear()          # 显示尺寸变了，表情帧缓存作废
         self._expr_pixmaps.clear()
+        self._swing_cache = None         # 摆动帧按旧尺寸烘焙，一并作废
         self.blink_pixmaps = [to_pixmap(f, height) for f in self.raw_blink]
         # 头发飘动要按显示尺寸重采样 RGBA，位移场也按显示尺寸烘焙
         self.base_rgba = resize_rgba(self.asset.rgba, self.base.height())
@@ -277,6 +334,11 @@ class PetWindow(QWidget):
                                       self.base.width(), self.base.height(),
                                       **self.asset.hair_params())
                             if self.cloth_enabled else None)
+        # 摆动幅度：只作用于本窗口实例，不改共享的 asset.motion，也不写回 manifest
+        self._swing_fields = [f for f in (self.hair_field, self.cloth_field)
+                              if f is not None]
+        self._base_amps = [f.amp for f in self._swing_fields]
+        self._apply_motion_scale(self.motion_scale, persist=False)
         self.ax = self.asset.anchor[0] * self.base.width()
         self.ay = self.asset.anchor[1] * self.base.height()
         self.margin = max(20, min(80, height // 8))
@@ -464,23 +526,28 @@ class PetWindow(QWidget):
         bi = self._manual_blink_index()
         if bi is not None and bi < len(self.blink_rgba):
             src, pm = self.blink_rgba[bi], self.blink_pixmaps[bi]
+            key = ("blink", bi)
         else:
             active = (self._timeline_blinks(self.elapsed)
                       if self.blink_enabled and not self.paused else {})
             if active:
                 src, pm = self.base_rgba, self._compose_group_blink(active)
+                key = ("gblink", tuple(sorted(active.items())))
             elif self._expr_active():
-                src, pm = self._expr_frame(self._resolved.get("expr") or "normal")
+                state = self._resolved.get("expr") or "normal"
+                src, pm = self._expr_frame(state)
+                key = ("expr", state)
             elif self.gaze_enabled and self._gaze_eyes():
                 gx, gy = int(round(self.gaze_vec[0])), int(round(self.gaze_vec[1]))
                 if gx or gy:
                     src, pm = self._gaze_rgba(gx, gy), self._gaze_pixmap(gx, gy)
+                    key = ("gaze", gx, gy)
                 else:
-                    src, pm = self.base_rgba, self.base
+                    src, pm, key = self.base_rgba, self.base, ("base",)
             else:
-                src, pm = self.base_rgba, self.base
+                src, pm, key = self.base_rgba, self.base, ("base",)
         if self._hair_active():
-            return self._hair_pixmap(src)
+            return self._hair_pixmap(src, key)
         return pm
 
     # ---------- 表情差分（半眼 / 惊讶 / 单侧眨眼） ----------
@@ -615,17 +682,114 @@ class PetWindow(QWidget):
             self.vel[1] *= k
         tilt = 0.0
         if self.animate:
-            tilt = self.asset.motion.at(self.elapsed)["angle"]
+            tilt = self._sway_angle()
         for f in fields:
             f.step(dt, self.vel[0], tilt)
 
-    def _hair_pixmap(self, rgba: np.ndarray) -> QPixmap:
-        """在传入的源帧上绕发根旋转发缕；眨眼/视线帧不会被头发盖掉。"""
-        out = rgba
-        for f in (self.hair_field, self.cloth_field):
-            if f is not None and f.ready:
-                out = f.swing(out)
-        return to_pixmap(out, None)
+    def _hair_pixmap(self, rgba: np.ndarray, key: tuple) -> QPixmap:
+        """在传入的源帧上绕发根旋转发缕；眨眼/视线帧不会被头发盖掉。
+
+        头发与衣服合并成一次重采样（swing_all），再按「源帧 + 角度变化量」缓存。
+        角度变化不足 0.4° 就复用上一帧成品，微风时约八成帧不必重算。
+        """
+        fields = [f for f in (self.hair_field, self.cloth_field)
+                  if f is not None and f.ready]
+        angles = tuple(s.angle for f in fields for s in f.items)
+        c = self._swing_cache
+        if (c is not None and c[0] == key and len(c[1]) == len(angles)
+                and max((abs(a - b) for a, b in zip(angles, c[1])), default=0.0) < 0.4):
+            return c[2]
+        pm = to_pixmap(swing_all(fields, rgba), None)
+        self._swing_cache = (key, angles, pm)
+        return pm
+
+    # ---------- 摆动幅度 / 整体漂移方向 ----------
+    @staticmethod
+    def _motion_cfg() -> Path:
+        """幅度设置的落盘位置（跟着 XDG_CONFIG_HOME 走）。"""
+        return motion_cfg_path()
+
+    def _sku_key(self) -> str:
+        """按素材所在目录名当 SKU（assets/<sku>/<stem>.png）；拿不到就用 default。"""
+        src = getattr(self.asset, "source", None)
+        if src is not None:
+            try:
+                p = Path(src)
+                return p.parent.name or p.stem or "default"
+            except (TypeError, ValueError):
+                pass
+        return "default"
+
+    def _load_motion_cfg(self) -> tuple[float, float | None]:
+        """读当前 SKU 上次选的幅度倍数与漂移方向；旧扁平配置读时降级、不写回。
+
+        方向用屏幕角度记：0=右、90=上、180=左、270=下；None = 不额外整体移动。
+        """
+        return load_motion(self._motion_cfg(), self._sku_key())
+
+    def _save_motion_cfg(self):
+        try:
+            save_motion(self._motion_cfg(), self._sku_key(),
+                        self.motion_scale, self.motion_dir)
+        except OSError:
+            pass
+
+    def _apply_motion_scale(self, scale: float, persist: bool = True):
+        """套用幅度倍数：整体摇摆与头发/衣服摆动同步缩放，0 = 完全静止。
+
+        `_base_amps` 是本次重建时的原始幅度，反复调档不会累积放大；
+        `asset.motion` 保持原值，倍数只在绘制与推进时相乘。
+        """
+        scale = min(3.0, max(0.0, float(scale)))
+        self.motion_scale = scale
+        for f, base in zip(self._swing_fields, self._base_amps):
+            f.amp = base * scale
+        self._swing_cache = None
+        if persist:
+            self._save_motion_cfg()
+        self.update()
+
+    def _set_motion_dir(self, deg: float | None):
+        """箭头盘选中的方向：None = 恢复原来的左右摇摆。"""
+        self.motion_dir = None if deg is None else float(deg) % 360.0
+        self._save_motion_cfg()
+        self.update()
+
+    def _sway_angle(self) -> float:
+        """身体摇摆角（度）；选了方向就按箭头做投影（上下 → 不倾斜）。"""
+        if not (self.animate and not self.paused):
+            return 0.0
+        a = self.asset.motion.at(self.elapsed)["angle"] * self.motion_scale
+        if self.motion_dir is not None:
+            a *= math.cos(math.radians(self.motion_dir))
+        return a
+
+    def _sway_offset(self) -> tuple[float, float]:
+        """沿箭头方向的整体往返位移（屏幕像素）；没选方向时为 (0, 0)。
+
+        幅度跟「摆动幅度」同一倍数：档位调小整体一起变小，0 档完全不动。
+        """
+        if self.motion_dir is None or not (self.animate and not self.paused):
+            return 0.0, 0.0
+        amp = max(2.0, self.base.height() * 0.015) * self.motion_scale
+        u = math.sin(2 * math.pi * self.elapsed
+                     / max(0.6, self.asset.motion.sway_period))
+        r = math.radians(self.motion_dir)
+        return amp * u * math.cos(r), -amp * u * math.sin(r)
+
+    def _open_dir_pad(self, pos):
+        """弹出九宫格方向盘：点箭头即时生效，中间「默认」回到左右摇摆。"""
+        pad = _DirPad(self.motion_dir, self._set_motion_dir, self)
+        pad.adjustSize()
+        scr = QApplication.screenAt(pos) or QApplication.primaryScreen()
+        target = pos + QPoint(12, 12)
+        if scr is not None:
+            g = scr.availableGeometry()
+            target.setX(min(target.x(), g.right() - pad.width()))
+            target.setY(min(target.y(), g.bottom() - pad.height()))
+        pad.move(target)
+        pad.show()
+        self._dir_pad = pad           # 持有引用，避免弹窗被回收
 
     def _gaze_rgba(self, gx: int, gy: int) -> np.ndarray:
         """显示尺寸的视线帧；与 Pixmap 缓存同一套键。
@@ -730,11 +894,14 @@ class PetWindow(QWidget):
         m = self.margin
         scale_y, angle = 1.0, 0.0
         if self.animate and not self.paused:
-            p = self.asset.motion.at(self.elapsed)
-            scale_y, angle = p["scale_y"], p["angle"]
+            scale_y = self.asset.motion.at(self.elapsed)["scale_y"]
+            angle = self._sway_angle()
+        ox, oy = self._sway_offset()
         sx, sy = self._bounce_scale()
 
         tr = QTransform()
+        # 位移写在最外层：直接按屏幕像素平移整只桌宠，不随缩放/摇摆放大
+        tr.translate(ox, oy)
         tr.translate(m + self.ax, m + self.ay)
         tr.scale(sx, scale_y * sy)
         tr.rotate(angle)
@@ -914,6 +1081,18 @@ class PetWindow(QWidget):
         act_hair = None
         if self.hair_field is not None and self.hair_field.ready:
             act_hair = menu.addAction("关闭头发飘动" if self.hair_enabled else "开启头发飘动")
+        # 摆动幅度：整体摇摆 + 头发/衣服同步缩放，0 档等于完全静止
+        motion_actions = {}
+        if self.animate or self._swing_fields:
+            sub_motion = menu.addMenu("摆动幅度")
+            for label, sc in (("静止", 0.0), ("小", 0.5), ("标准", 1.0),
+                              ("大", 1.5), ("更大", 2.0), ("夸张", 3.0)):
+                a = sub_motion.addAction(label)
+                a.setCheckable(True)
+                a.setChecked(abs(sc - self.motion_scale) < 1e-6)
+                motion_actions[a] = sc
+        act_dir = menu.addAction("整体漂移方向…")
+        act_dir.setToolTip("整只桌宠沿箭头方向往返平移；是「来回摆的轴」，不是往单侧飘")
         menu.addSeparator()
         act_bigger = menu.addAction("放大  +8%")
         act_smaller = menu.addAction("缩小  -8%")
@@ -951,6 +1130,10 @@ class PetWindow(QWidget):
         elif act is not None and act == act_hair:
             self.hair_enabled = not self.hair_enabled
             self.update()
+        elif act is not None and act in motion_actions:
+            self._apply_motion_scale(motion_actions[act])
+        elif act == act_dir:
+            self._open_dir_pad(event.globalPos())
         elif act == act_bigger:
             self._scale_by(1.08)
         elif act == act_smaller:

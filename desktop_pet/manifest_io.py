@@ -17,6 +17,14 @@ from pathlib import Path
 
 SCHEMA_VERSION = 2
 CHANNEL_ENUM = ("R", "G")
+
+# 摆动区域（hair / cloth）逐项参数的唯一口径；schema 与校验都以这里为准
+SWAY_DEFAULTS = {"amp": 1.0, "dir": None, "bias": 0.0}
+SWAY_RANGES = {"amp": (0.0, 3.0), "bias": (-45.0, 45.0)}   # dir: 0 <= v < 360
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 _WARNED: set[str] = set()
 
 
@@ -198,6 +206,33 @@ def validate_manifest(data: dict) -> tuple[bool, str]:
                 for key in ("t", "hold"):
                     if not isinstance(ti.get(key), (int, float)):
                         return False, f"items[{i}].timeline.items[{k}].{key} 必须是数字"
+        for key in ("hair", "cloth"):
+            ws = it.get(key)
+            if ws is None:
+                continue
+            if not isinstance(ws, list):
+                return False, f"items[{i}].{key} 必须是数组"
+            for k, w in enumerate(ws):
+                if not isinstance(w, dict):
+                    return False, f"items[{i}].{key}[{k}] 不是对象"
+                for pk in ("pivot", "tip"):
+                    v = w.get(pk)
+                    if v is not None and not (
+                            isinstance(v, list) and len(v) == 2
+                            and all(_is_num(x) for x in v)):
+                        return False, f"items[{i}].{key}[{k}].{pk} 必须是两个数字"
+                if "amp" in w:
+                    lo, hi = SWAY_RANGES["amp"]
+                    if not _is_num(w["amp"]) or not (lo <= float(w["amp"]) <= hi):
+                        return False, f"items[{i}].{key}[{k}].amp 必须在 {lo}~{hi}"
+                d = w.get("dir")
+                if d is not None:
+                    if not _is_num(d) or not (0 <= float(d) < 360):
+                        return False, f"items[{i}].{key}[{k}].dir 必须在 0~360（不含 360）"
+                if "bias" in w:
+                    lo, hi = SWAY_RANGES["bias"]
+                    if not _is_num(w["bias"]) or not (lo <= float(w["bias"]) <= hi):
+                        return False, f"items[{i}].{key}[{k}].bias 必须在 {lo}~{hi}"
     return True, "ok"
 
 

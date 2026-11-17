@@ -696,12 +696,15 @@ def save_eyes_json(source_dir: Path, stem: str, crop_size, boxes, origin,
 
 
 def save_hair_polys(source_dir: Path, stem: str, crop_size, wisps, origin,
-                    force: bool = False, kind: str = "hair") -> Path | None:
+                    force: bool = False, kind: str = "hair",
+                    masks_dirty: bool = True) -> Path | None:
     """多边形发缕 / 衣服（原图坐标）-> 裁切区域坐标，写到 source 目录供 build_one 使用。
 
     每块落盘一张灰度 mask `<stem>_<kind>1.png`…，json 记发根(旋转中心)与发梢；
     kind="hair" 是头发，"cloth" 是衣服 / 小附件的飘动区域。
     force=True 时即使一块都没有也写一份空列表：明确表示这张图不做这类飘动。
+    masks_dirty=False 只更新 json 里的幅度 / 方向 / 偏置，不重写、也不删除已有 mask
+    （拖幅度条时用，避免每次调参都重写整批 PNG）。
     """
     if not wisps and not force:
         return None
@@ -717,16 +720,38 @@ def save_hair_polys(source_dir: Path, stem: str, crop_size, wisps, origin,
         if m.shape != (ch, cw) or not m.any():
             continue
         name = f"{stem}_{kind}{i}.png"
-        cv2.imwrite(str(source_dir / name), m.astype(np.uint8) * 255)
-        out.append({"mask": name,
-                    "pivot": [clamp(float(w["pivot"][0]) - ox, cw),
-                              clamp(float(w["pivot"][1]) - oy, ch)],
-                    "tip": [clamp(float(w["tip"][0]) - ox, cw),
-                            clamp(float(w["tip"][1]) - oy, ch)]})
-    keep = {it["mask"] for it in out}
-    for old in source_dir.glob(f"{stem}_{kind}*.png"):
-        if old.name not in keep:
-            old.unlink()
+        # 只改元数据时也兜底补写缺失的 mask，避免 json 指向不存在的文件
+        if masks_dirty or not (source_dir / name).exists():
+            cv2.imwrite(str(source_dir / name), m.astype(np.uint8) * 255)
+        entry = {"mask": name,
+                 "pivot": [clamp(float(w["pivot"][0]) - ox, cw),
+                           clamp(float(w["pivot"][1]) - oy, ch)],
+                 "tip": [clamp(float(w["tip"][0]) - ox, cw),
+                         clamp(float(w["tip"][1]) - oy, ch)]}
+        # 逐区域幅度 / 方向 / 偏置：缺省不写（旧文件往返后仍是 1.0 / 法线 / 0）
+        try:
+            amp = min(3.0, max(0.0, float(w.get("amp", 1.0))))
+        except (TypeError, ValueError):
+            amp = 1.0
+        if abs(amp - 1.0) > 1e-6:
+            entry["amp"] = round(amp, 2)
+        if w.get("dir") is not None:
+            try:
+                entry["dir"] = round(float(w["dir"]) % 360.0, 1)
+            except (TypeError, ValueError):
+                pass
+        try:
+            bias = min(45.0, max(-45.0, float(w.get("bias", 0.0))))
+        except (TypeError, ValueError):
+            bias = 0.0
+        if abs(bias) > 1e-6:
+            entry["bias"] = round(bias, 2)
+        out.append(entry)
+    if masks_dirty:
+        keep = {it["mask"] for it in out}
+        for old in source_dir.glob(f"{stem}_{kind}*.png"):
+            if old.name not in keep:
+                old.unlink()
     p = source_dir / f"{stem}_{kind}.json"
     p.write_text(json.dumps({"stem": stem, "image_size": [int(cw), int(ch)],
                              "wisps": out}, ensure_ascii=False, indent=2),

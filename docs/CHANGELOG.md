@@ -2,6 +2,67 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## 摆动收敛（逐区域幅度 / 方向 / bias）
+
+### 行为变更
+
+- **编辑器「头发 / 衣服」合并为「摆动」页**：同一张列表（类型 / 区域 / 摆动轴 /
+  幅度 / 末端），每行可单独调幅度（0~3.0×）与摆动轴。
+- **「方向」改称「摆动轴（往返轴）」**：它定义的是来回摆的轴，不是「往哪边飘」；
+  运行时九宫格同步改称「整体漂移方向」。
+- **轴与丝长夹角 < 25° 时自动取垂直分量**：避免沿丝长方向出现拉长 / 压缩；
+  列表行内以 `⊥` 提示（保存的 `dir` 仍是用户所选值）。
+- **新增 `bias`（角度偏置，度）**：`angle = A·sin(ωt) + bias`，走同一个 angle
+  通道，`swing_all` 未改；`bias=0` 时逐帧结果与旧实现一致（有 golden 测试）。
+- **自定义轴恢复内摆保护**：向身体内侧的目标摆幅仍为外摆的 60%；外缘临透明的
+  发丝保持原例外。
+- **像素位移上限合并**：逐区域 3× 叠运行时 3× 不再到 9×，单块区域发梢位移
+  上限 14px（`MAX_SWAY_SHIFT_PX`）。
+- **调参落盘拆分**：拖幅度 / 改方向只写 JSON（`masks_dirty=False`），不重写
+  也不删除 mask PNG；增删区域仍走完整保存。
+
+### 数据格式
+
+- sidecar（`<stem>_hair.json` / `<stem>_cloth.json`）与 manifest 的
+  `hair[]` / `cloth[]` 逐项支持 `amp`（0~3，缺省 1.0，等于 1.0 时省略）、
+  `dir`（0~360，`null` = 沿法线，缺省省略）、`bias`（-45~45，0 时省略）。
+- `manifest.schema.json` 新增 `$defs.swayWisp`，`hair` / `cloth` 共用；
+  `manifest_io.validate_manifest` 同步校验，口径常量 `SWAY_DEFAULTS` /
+  `SWAY_RANGES` 与 schema 由一致性测试钉住。
+- 运行时配置 `~/.config/desktop_pet/motion.json` 改为按 SKU：
+  `{"skus": {"<sku>": {"scale": 1.0, "dir": null}}}`；旧扁平格式读取时降级、
+  不自动写回，用户下次修改才按新格式保存，且保留其他 SKU。
+
+### 已知边界（显式接受，不是待修 bug）
+
+| 事实 | 原因 / 处理 |
+| --- | --- |
+| `dir` 是往返轴，不是单向偏置 | 由正弦驱动；要单向飘需另加 bias，已保留字段 |
+| 方向只有 8 档，无逐区域风力 / 相位 | 未实现；当前共用 `wind_speed / amp / stiffness / damping` |
+| `bias` 已支持但 UI 不暴露 | 先落数据与渲染，避免再做一轮 UI 改动 |
+| 结构性修改（增删区域 / 改眼眶 / 时间轴）仍整体重建引擎 | 纯调幅度 / 方向已走 `apply_params` 就地更新 |
+| `swing_all` 单帧 512² 5.8ms / 1024² 18.1ms | 口径：同机同图、3 块区域、7 次中位数、T-S1 之后；内核未改，拖动流畅来自 `apply_params` 就地更新 + 80ms 预览合并，不是内核提速。大图预览仍有轻微掉帧风险，未做降采样 |
+| 运行时逐区域参数与右键「整体漂移方向」互不读取 | 两个概念，文案已区分 |
+
+摆动是 `arbiter` 之外**显式接受的例外**：它是 30fps 连续物理量 + 逐实例交互，
+不塞进 `resolve()`（离散事件状态机）。状态归属如下，任何一处不得反向覆盖：
+
+| 状态 | 唯一写者 | 读方 |
+| --- | --- | --- |
+| 编辑器 `_cut["hair"]` / `["cloth"]` | `_amp_cell` / `_set_sway_dir` / `_annotate_sway` | 预览、sidecar |
+| `<stem>_hair.json` / `_cloth.json` | `save_hair_polys()`（调参只写 JSON） | `load_hair_sidecar` |
+| manifest `hair` / `cloth` 数组 | `map_hair_wisps()` | `hair_from_dicts` |
+| `asset.motion`（共享对象） | 构建期一次 | 运行时只读（逐实例倍率不写回） |
+| `motion.json` 的 `skus.<sku>` | `_apply_motion_scale` / `_set_motion_dir` | 当前窗口 |
+
+> 逐区域 `amp` / `dir` / `bias` 的唯一真源是 **manifest 的 `hair` / `cloth` 数组**；
+> 编辑器态、sidecar、`asset.motion`、`motion.json` 都是它的上下游投影，
+> 任何一处不得反向覆盖。
+>
+> 例外说明：`motion.json` 是**用户调参覆盖层**（只存整体漂移 `scale` / `dir`），
+> 读时覆盖 manifest / `asset.motion` 的默认值，仅在用户主动调参时写，
+> **manifest 不被反写**；两者都有值时运行时以 `motion.json` 为准。
+
 ## 收敛轮（单一状态源 / 仲裁 / manifest v2）
 
 ### 行为变更

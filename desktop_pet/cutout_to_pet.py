@@ -382,9 +382,26 @@ def load_hair_sidecar(img_path: Path, shape, kind: str = "hair") -> list[dict] |
             if m is None or m.shape[:2] != shape[:2]:
                 print(f"  [warn] {it.get('mask')} 读不到或尺寸与源图不符，忽略这块{label}")
                 continue
-            out.append({"mask": m > 127,
-                        "pivot": [float(it["pivot"][0]), float(it["pivot"][1])],
-                        "tip": [float(it["tip"][0]), float(it["tip"][1])]})
+            entry = {"mask": m > 127,
+                     "pivot": [float(it["pivot"][0]), float(it["pivot"][1])],
+                     "tip": [float(it["tip"][0]), float(it["tip"][1])]}
+            try:
+                entry["amp"] = min(3.0, max(0.0, float(it.get("amp", 1.0))))
+            except (TypeError, ValueError):
+                entry["amp"] = 1.0
+            d = it.get("dir")
+            if d is not None:
+                try:
+                    entry["dir"] = float(d) % 360.0
+                except (TypeError, ValueError):
+                    pass
+            b = it.get("bias")
+            if b is not None:
+                try:
+                    entry["bias"] = min(45.0, max(-45.0, float(b)))
+                except (TypeError, ValueError):
+                    pass
+            out.append(entry)
         except (KeyError, TypeError, ValueError, IndexError):
             continue
     return out or None
@@ -423,11 +440,27 @@ def map_hair_wisps(wisps: list[dict], crop, size, out_dir: Path,
             continue
         name = f"{stem}_{kind}{i}.png"
         cv2.imwrite(str(out_dir / name), m.astype(np.uint8) * 255)
-        out.append({"mask": name,
-                    "pivot": [round((w["pivot"][0] - x0) * sx, 1),
-                              round((w["pivot"][1] - y0) * sy, 1)],
-                    "tip": [round((w["tip"][0] - x0) * sx, 1),
-                            round((w["tip"][1] - y0) * sy, 1)]})
+        entry = {"mask": name,
+                 "pivot": [round((w["pivot"][0] - x0) * sx, 1),
+                           round((w["pivot"][1] - y0) * sy, 1)],
+                 "tip": [round((w["tip"][0] - x0) * sx, 1),
+                         round((w["tip"][1] - y0) * sy, 1)]}
+        # 逐区域幅度 / 方向原样带进 manifest（缺省 = 1.0 / 沿发丝法线）
+        try:
+            entry["amp"] = min(3.0, max(0.0, float(w.get("amp", 1.0))))
+        except (TypeError, ValueError):
+            entry["amp"] = 1.0
+        if w.get("dir") is not None:
+            try:
+                entry["dir"] = float(w["dir"]) % 360.0
+            except (TypeError, ValueError):
+                pass
+        if w.get("bias") is not None:
+            try:
+                entry["bias"] = min(45.0, max(-45.0, float(w["bias"])))
+            except (TypeError, ValueError):
+                pass
+        out.append(entry)
     if not out:
         return None
     keep = {it["mask"] for it in out}
