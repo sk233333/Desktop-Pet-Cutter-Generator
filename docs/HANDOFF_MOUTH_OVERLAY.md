@@ -78,9 +78,11 @@ class MouthOverlay:
         """返回新数组；只在 alpha bbox 内做 source-over，bbox 外逐比特不变。"""
 ```
 
-- 只用 `numpy` + `cv2`（CI 五包已有）；
+- 只用 `numpy` + `PIL`（CI 五包已有；避开 `cv2.imread` 的 BGR/RGB 顺序坑）；
 - 加载时预计算 `alpha > 0` 的 bbox 与 RGBA 子图；
 - `apply()` 先 `frame.copy()`，再只改 bbox；不原地改调用方缓存；
+- 只处理 RGBA（4 通道）；RGB（3 通道）帧不做合成、原样返回同一数组；
+- 合成公式 = 按 src alpha 混 RGB、**dst alpha 原样保留**（非标准 Porter-Duff）；
 - 不做全图浮点混合（30fps 成本可控）。
 
 ### 3.3 `PetWindow` 接线（唯一改动的现有文件）
@@ -111,12 +113,29 @@ class MouthOverlay:
 
 每一步单独可回滚；T-M3 之前 `mouth_dir` 仍不消费，旧行为零变化。
 
+### T-M1 补钉（已并入 T-M1 commit）
+
+- `_WARNED` key = `(sku_dir, name, kind)`；不同 SKU 同名缺失各打一行，补对应断言。
+- RGB（3 通道）帧不做合成、原样返回同一数组；补断言。
+- 参考合成公式 = 按 src alpha 混 RGB、dst alpha 原样保留（非标准 Porter-Duff）；
+  docstring 写明，C-M2 参考实现按此对齐。
+- 断言数变化后 commit message 按实际值写，不照抄 147。
+
+### T-M2 接线契约（下一轮，不改 T-M1）
+
+- `load(size)` 的 `size` 必须是**原始素材分辨率**；`_pick_frame()` 在缩放前调 `apply()`。
+  传显示帧会命中「尺寸不符」静默返回原数组——不崩，但看起来像没生效。
+- `mouth_dir` + `mouth_level` 拼出的 name 必须整体过 `load()` 的路径守卫，
+  不在拼接处绕过（例如 `mouth_level` 带 `..`）。
+- 可选 `item` 默认 `None`、旧构造点零改动；`resolve_asset()` 已返回 item 时优先复用；
+  重读失败 / 无匹配 → 静默跳过且逐比特一致。
+
 ## 5. 断言（可执行）
 
 | 编号 | 断言 |
 |---|---|
 | C-M1 | **仅 PetWindow 侧**：无 `mouth_dir` 时，`_pick_frame` 的 base / blink / expr / gaze 四路输出与 `74b7ba0` 逐字节一致；**不含** `ui_app.PetPreview`（首期不同步，见 Q4） |
-| C-M2 | 有覆盖层时，alpha bbox 外逐比特不变；bbox 内等于参考 `_over(base, overlay)` |
+| C-M2 | 有覆盖层时，alpha bbox 外逐比特不变；bbox 内按「src alpha 混 RGB、dst alpha 原样保留」与参考一致 |
 | C-M3a | 尺寸不符 → 不崩溃、warn、输出等于 C-M1（独立用例，不与 b/c 合并） |
 | C-M3b | 文件损坏 / 解码失败 → 不崩溃、warn、输出等于 C-M1（独立用例） |
 | C-M3c | 文件缺失 → 不崩溃、warn、输出等于 C-M1（独立用例） |
