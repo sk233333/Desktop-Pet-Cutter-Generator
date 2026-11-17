@@ -21,14 +21,23 @@ from PIL import Image
 _WARNED: set[str] = set()
 
 
-def _warn(kind: str, sku_dir, name: str, detail: str = ""):
-    """同一 SKU 的同一文件同一类失败只打一次；不同 SKU 不互相吞。"""
-    key = (str(sku_dir), name, kind)
+def _warn(kind: str, sku_dir, name: str, detail: str = "", key=None):
+    """同一 SKU 的同一文件同一类失败只打一次；不同 SKU 不互相吞。
+
+    需要把 stem 等额外维度并入去重时，显式传 `key`。
+    """
+    key = key if key is not None else (str(sku_dir), name, kind)
     if key in _WARNED:
         return
     _WARNED.add(key)
     suffix = f"（{detail}）" if detail else ""
     print(f"[mouth] {sku_dir}: {kind}：{name}{suffix}", file=sys.stderr)
+
+
+def warn_files_fallback(manifest, stem: str, filename: str):
+    """stem 零命中、按 files basename 精确兜底成功时，打一行可追溯的 warn。"""
+    _warn("stem 未命中，按 files 精确兜底", manifest, filename,
+          f"stem={stem}", key=(str(manifest), stem, filename))
 
 
 def _is_within(root: Path, path: Path) -> bool:
@@ -37,6 +46,47 @@ def _is_within(root: Path, path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def match_items(items, source) -> tuple[list[dict], bool]:
+    """按源图 stem 精确匹配；零命中时才按 files 的**精确 basename** 兜底。
+
+    返回 `(命中列表, 是否走了 files 兜底)`；全部命中都返回，由调用方决定
+    「唯一才用、多条跳过」——这里不猜第一条，也不做 contains / 前缀匹配。
+    """
+    try:
+        p = Path(source)
+    except TypeError:
+        return [], False
+    stem, name = p.stem, p.name
+    rows = [it for it in (items or []) if isinstance(it, dict)]
+    hits = [it for it in rows if it.get("stem") == stem]
+    if hits:
+        return hits, False
+    out = []
+    for it in rows:
+        files = it.get("files")
+        if not isinstance(files, list):
+            continue
+        if any(isinstance(f, str) and Path(f).name == name for f in files):
+            out.append(it)
+    return out, bool(out)
+
+
+def mouth_name(item: dict, stem: str) -> str | None:
+    """`mouth_dir` 优先；缺失时按 `stem + mouth_level` 生成。
+
+    返回值整体交给 `MouthOverlay.load()` 的路径守卫，不在拼接处绕过。
+    """
+    if not isinstance(item, dict):
+        return None
+    name = item.get("mouth_dir")
+    if isinstance(name, str) and name.strip():
+        return name
+    level = item.get("mouth_level")
+    if isinstance(level, str) and level.strip():
+        return f"{stem}_mouth_{level.strip()}.png"
+    return None
 
 
 class MouthOverlay:

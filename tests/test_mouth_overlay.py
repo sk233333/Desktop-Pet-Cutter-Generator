@@ -17,7 +17,8 @@ if str(ROOT / "desktop_pet") not in sys.path:
     sys.path.insert(0, str(ROOT / "desktop_pet"))
 
 import mouth_overlay  # noqa: E402
-from mouth_overlay import MouthOverlay  # noqa: E402
+from mouth_overlay import (MouthOverlay, match_items, mouth_name,  # noqa: E402
+                           warn_files_fallback)
 
 SIZE = (20, 20)  # (h, w)
 
@@ -151,6 +152,69 @@ def test_warn_two_skus_same_name(tmp_path, capsys):
     assert MouthOverlay.load(a, name, SIZE) is None
     assert MouthOverlay.load(b, name, SIZE) is None
     assert capsys.readouterr().err.count(name) == 2
+
+
+def test_mouth_name_prefers_mouth_dir():
+    assert mouth_name({"mouth_dir": "x.png", "mouth_level": "smile"},
+                      "stem") == "x.png"
+
+
+def test_mouth_name_falls_back_to_level():
+    assert mouth_name({"mouth_level": "smile"}, "stem") == "stem_mouth_smile.png"
+
+
+def test_mouth_name_empty():
+    assert mouth_name({}, "stem") is None
+    assert mouth_name({"mouth_dir": "  "}, "stem") is None
+    assert mouth_name({"mouth_level": "  "}, "stem") is None
+
+
+def test_load_rejects_level_with_parent(tmp_path):
+    name = mouth_name({"mouth_level": "../../evil"}, "stem")
+    assert name is not None
+    assert MouthOverlay.load(tmp_path, name, SIZE) is None
+
+
+def test_match_items_by_stem():
+    items = [{"stem": "a", "files": ["a.png"]},
+             {"stem": "b", "files": ["b.png"]}]
+    hits, via_files = match_items(items, "a.png")
+    assert hits == [items[0]]
+    assert via_files is False
+
+
+def test_match_items_stem_wins_over_files():
+    items = [{"stem": "a", "files": ["other.png"]},
+             {"stem": "x", "files": ["a.png"]}]
+    hits, via_files = match_items(items, "a.png")
+    assert hits == [items[0]]
+    assert via_files is False
+
+
+def test_match_items_falls_back_to_files():
+    items = [{"stem": "renamed", "files": ["dir/a.png"]}]
+    hits, via_files = match_items(items, "a.png")
+    assert hits == items
+    assert via_files is True
+
+
+def test_match_items_multiple_returns_all():
+    items = [{"stem": "a"}, {"stem": "a"}]
+    hits, _ = match_items(items, "a.png")
+    assert len(hits) == 2
+
+
+def test_match_items_no_hit():
+    hits, via_files = match_items([{"stem": "a"}], "b.png")
+    assert hits == []
+    assert via_files is False
+
+
+def test_files_fallback_warn_once(tmp_path, capsys):
+    man = tmp_path / "manifest.json"
+    warn_files_fallback(man, "a", "a.png")
+    warn_files_fallback(man, "a", "a.png")
+    assert capsys.readouterr().err.count("files 精确兜底") == 1
 
 
 def test_warn_module_exists():

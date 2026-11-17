@@ -60,6 +60,8 @@ try:
                                 partial_text)
     from .manifest_io import active_eye_indices, read_manifest
     from .motion_cfg import load_motion, motion_cfg_path, save_motion
+    from .mouth_overlay import (MouthOverlay, match_items, mouth_name,
+                                warn_files_fallback)
 except ImportError:  # 直接以脚本方式运行
     from anim import (HairField, PetAsset, blink_group_counts, blink_phases,
                       compose_group_blink, eye_group_bbox, gaze_frame,
@@ -70,6 +72,8 @@ except ImportError:  # 直接以脚本方式运行
                                partial_text)
     from manifest_io import active_eye_indices, read_manifest
     from motion_cfg import load_motion, motion_cfg_path, save_motion
+    from mouth_overlay import (MouthOverlay, match_items, mouth_name,
+                               warn_files_fallback)
 
 
 class _ExprPort:
@@ -89,6 +93,7 @@ class _ExprPort:
         return name
 
 ROOT = Path(__file__).resolve().parent
+_MOUTH_WARNED: set[tuple] = set()
 
 
 def prefer_xcb():
@@ -172,7 +177,7 @@ class PetWindow(QWidget):
     def __init__(self, asset: PetAsset, height: int | None,
                  fps: int = 24, blink: bool = True, animate: bool = True,
                  gaze: bool = True, land: bool = True, hair: bool = True,
-                 pack=None):
+                 pack=None, item: dict | None = None):
         super().__init__(None,
                          Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint
@@ -182,6 +187,8 @@ class PetWindow(QWidget):
 
         self.pack = pack              # PetPack：多只时由它统一驱动与碰撞
         self.asset = asset
+        # T-M2：只取 item 并加载覆盖层；T-M3 才在 _pick_frame() 里合成
+        self._mouth = self._load_mouth_overlay(item)
         self.raw_blink = asset.blink_frames() if (blink and asset.blink_on) else []
         self.blink_enabled = blink and bool(self.raw_blink)
         self.animate = animate
@@ -761,6 +768,43 @@ class PetWindow(QWidget):
             except (TypeError, ValueError):
                 pass
         return "default"
+
+    def _load_mouth_overlay(self, item: dict | None):
+        """T-M2：取 manifest item 并只读加载嘴型覆盖层；不在这里合成。
+
+        - 传了 item 就直接用（调用方来自 resolve_asset 的复用路径）；
+        - 没传则用 read_manifest() 重读，按 stem 精确匹配，命中多条跳过并 warn；
+        - 读不到 / 无匹配 / 无 mouth_dir 一律返回 None，基础帧零变化。
+        """
+        src = self.asset.source
+        if src is None:
+            return None
+        src = Path(src)
+        if not isinstance(item, dict):
+            man = src.parent / "manifest.json"
+            if not man.is_file():
+                return None
+            try:
+                data = read_manifest(man)
+            except Exception:
+                return None
+            hits, via_files = match_items(data.get("items") or [], src)
+            if len(hits) > 1:
+                key = (str(man), src.stem, "dup", len(hits))
+                if key not in _MOUTH_WARNED:
+                    _MOUTH_WARNED.add(key)
+                    print(f"[mouth] {man.name}: stem={src.stem} 命中 "
+                          f"{len(hits)} 条，跳过", file=sys.stderr)
+                return None
+            if not hits:
+                return None
+            if via_files:
+                warn_files_fallback(man, src.stem, src.name)
+            item = hits[0]
+        name = mouth_name(item, src.stem)
+        if not name:
+            return None
+        return MouthOverlay.load(src.parent, name, self.asset.rgba.shape[:2])
 
     def _load_motion_cfg(self) -> tuple[float, float | None]:
         """读当前 SKU 上次选的幅度倍数与漂移方向；旧扁平配置读时降级、不写回。
