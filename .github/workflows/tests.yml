@@ -13,11 +13,13 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        # anim.py 用 PIL 读眼眶 mask；漏了会在 import 阶段直接红
-        run: pip install numpy opencv-python-headless pillow pytest
+        # anim.py 用 PIL 读眼眶 mask；launch.py 顶层 import matplotlib，
+        # 测试要导入 save_hair_polys 就会带上它，漏了在 import 阶段直接红
+        run: pip install numpy opencv-python-headless pillow matplotlib pytest
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
+          MPLBACKEND: Agg          # 无 X 环境，别让 launch.py 切 TkAgg
         run: |
           set -o pipefail
           python -m pytest tests -q | tee pytest.log
