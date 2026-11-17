@@ -265,9 +265,27 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 
 - 逐 SKU、逐候选人工确认；整体否决 = 零路径。批量只出报告，**不批量 commit**。
 - 落盘统一过 `validate_manifest`；v1 manifest 走 `v1_to_v2` 同一迁移入口。
-- 原图 `base` 不动，产物一律独立覆盖层；`smile` / `calib.*` / L3 / AI 均不在首期。
+- 原图 `base` 不动，产物一律独立覆盖层；向导首期不含 `smile` / `calib.*` / L3；
+  AI 对话见下一节（默认关闭）。
 - `ExprBank` 仍是六态、`smile → half` 别名不变；`mouth_dir` 目前只是数据槽，
   运行时尚未消费（接线排 v0.1.1，需显式放行）。测试以 `pytest -q` 当前结果为准。
+
+### AI 对话（A1，默认关闭）
+
+桌宠右键**「说句话…」**可发一句话：回复以气泡流式显示，只写 `expr` 一个状态通道；
+动作用 `ActionBridge` 白名单。开启前零网络、零后台轮询：
+
+1. 复制 `desktop_pet/agent.json.example` 为 `desktop_pet/agent.json`（已在 `.gitignore`）；
+2. 填 `base_url` / `model` / `key_env`，密钥只放环境变量（如 `DESKTOP_PET_API_KEY`）；
+3. 把 `chat.enabled` 改为 `true`，重启桌宠。
+
+- 模型 ID 与地址不写死；换模型只改配置，不改代码。
+- 词表在窗口启动时从 `expr_state.STATES` + `ActionBridge.registry` +
+  逐 SKU `effects.enabled` 反推一次，**不含 `blink` / `smile`**；改配置需重启生效。
+- 上下文只带最近 `history` 轮原文，不做滚动摘要或长期记忆。
+- 无 key / 断网 / 429 / 超时 / 乱码 → 静默回 idle，不弹错误气泡。
+- `mouth_dir` 仍是数据槽；生成式候选、心跳、滚动摘要排 v0.1.1。
+- 测试：`pytest -q` 当前 133 passed，以实际输出为准。
 
 ### 跑起来（桌宠）
 

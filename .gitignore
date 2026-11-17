@@ -19,3 +19,8 @@ desktop_pet/source/custom/
 Punctuation_selection_of_images/image_assist_process/
 Punctuation_selection_of_images/image_assist_ans/
 Punctuation_selection_of_images/image/
+
+# AI 接入本地配置：只提交 agent.json.example，真实配置与密钥不入库
+desktop_pet/agent.json
+*.local.json
+.env

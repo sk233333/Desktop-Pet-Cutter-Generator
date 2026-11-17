@@ -1,0 +1,32 @@
+{
+  "chat": {
+    "enabled": false,
+    "base_url": "<由用户按服务方官方文档填写>",
+    "model": "<由用户按服务方官方文档填写>",
+    "key_env": "DESKTOP_PET_API_KEY",
+    "thinking": false,
+    "timeout_ms": 8000,
+    "max_tokens": 120,
+    "history": 10,
+    "json_mode": "object"
+  },
+  "provider": "openai_chat",
+  "profiles": {
+    "openai_chat": {
+      "surface": "openai_chat",
+      "json_mode": "object",
+      "stream": "delta",
+      "auth": "bearer"
+    }
+  },
+  "skus": {
+    "<sku 字符串 = assets/* 目录名>": {
+      "name": "小灰",
+      "persona": "话少、慢半拍、爱盯着人看。不张嘴说话，所有话都冒在气泡里。",
+      "style": "一句口语，不超过 30 字",
+      "emotion_allow": [],
+      "action_allow": [],
+      "mood_default": "calm"
+    }
+  }
+}

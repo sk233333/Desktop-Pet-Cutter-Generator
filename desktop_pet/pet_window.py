@@ -47,8 +47,8 @@ import numpy as np
 from PyQt6.QtCore import QPoint, QPointF, QRect, Qt, QTimer
 from PyQt6.QtGui import (QCursor, QFont, QGuiApplication, QImage, QPainter,
                          QPixmap, QTransform)
-from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QLabel, QMenu,
-                             QPushButton, QWidget)
+from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QInputDialog,
+                             QLabel, QMenu, QPushButton, QWidget)
 
 try:
     from .anim import (HairField, PetAsset, blink_group_counts, blink_phases,
@@ -56,6 +56,8 @@ try:
                        group_eyes, resize_rgba, swing_all)
     from .action_bridge import ActionBridge
     from .arbiter import Arbiter, timeline_phase
+    from .chat_contract import (chat_enabled, derive_allowed, load_agent_config,
+                                partial_text)
     from .manifest_io import active_eye_indices, read_manifest
     from .motion_cfg import load_motion, motion_cfg_path, save_motion
 except ImportError:  # 直接以脚本方式运行
@@ -64,6 +66,8 @@ except ImportError:  # 直接以脚本方式运行
                       group_eyes, resize_rgba, swing_all)
     from action_bridge import ActionBridge
     from arbiter import Arbiter, timeline_phase
+    from chat_contract import (chat_enabled, derive_allowed, load_agent_config,
+                               partial_text)
     from manifest_io import active_eye_indices, read_manifest
     from motion_cfg import load_motion, motion_cfg_path, save_motion
 
@@ -260,6 +264,36 @@ class PetWindow(QWidget):
         except Exception:
             self.actions = None
 
+        # AI 接入（A1）：配置只在窗口创建时读一次；词表在真实产物之上算一次。
+        # 关闭时不加载 ExprBank、不创建 worker，保证零网络。
+        self._chat_cfg = load_agent_config()
+        self.chat_enabled = chat_enabled(self._chat_cfg)
+        self.sku = asset.source.parent.name if getattr(asset, "source", None) else ""
+        self.chat_allowed = {"emotion": ["normal"], "action": []}
+        self._chat_history: list[dict] = []
+        self._chat_worker = None
+        self._chat_streaming = False
+        self._chat_buf = ""
+        self._chat_bubble_text = ""
+        if self.chat_enabled:
+            try:
+                try:
+                    from .expr_state import STATES
+                except ImportError:
+                    from expr_state import STATES
+                has_bank = asset.expr_bank() is not None
+                self.chat_allowed = derive_allowed(
+                    self.sku,
+                    STATES if has_bank else ("normal",),
+                    self.actions.registry if self.actions else {},
+                    getattr(asset, "effects_cfg", None),
+                )
+            except Exception:
+                self.chat_allowed = {"emotion": ["normal"], "action": []}
+            print(f"[chat] SKU={self.sku or '-'} "
+                  f"emotion={self.chat_allowed['emotion']} "
+                  f"action={self.chat_allowed['action']}")
+
         self.fps = max(8, fps)
         if pack is None:
             # 单只：自己驱动；多只时由 PetPack 一个定时器统一驱动，
@@ -382,6 +416,8 @@ class PetWindow(QWidget):
 
     def closeEvent(self, event):
         """关闭时从同进程宠物组里摘掉，最后一只关掉后停掉共享定时器。"""
+        if self._chat_worker is not None:
+            self._chat_worker.requestInterruption()
         super().closeEvent(event)
         if self.pack is not None:
             self.pack.remove(self)
@@ -447,7 +483,9 @@ class PetWindow(QWidget):
         if eff is not None:
             self.arbiter.request("idle", "expr", eff.get("expr", "normal"),
                                  eff.get("hold_ms"), now_ms)
-            if eff.get("bubble"):
+            # 流式窗口内只屏蔽 idle→bubble，避免覆盖聊天气泡；
+            # expr / gaze / body 的 idle 写入照常。
+            if eff.get("bubble") and not self._chat_streaming:
                 self.arbiter.request("idle", "bubble", eff["bubble"],
                                      eff.get("hold_ms"), now_ms)
             g = self.director.gaze_at(time.monotonic())
@@ -461,7 +499,11 @@ class PetWindow(QWidget):
         bub = self._resolved.get("bubble")
         if bub and bub != self._last_bubble:
             self._last_bubble = bub
-            self._bubble(bub)
+            hold = 6000 if bub == self._chat_bubble_text else 2000
+            self._bubble(bub, hold_ms=hold)
+        elif not bub:
+            # 气泡过期后清掉去重标记：否则同一句回复第二次不会显示
+            self._last_bubble = ""
 
     def _timeline_blinks(self, t: float) -> dict[int, int]:
         """按眼组返回当前该显示的相位：{组号: 0 半闭 / 1 全闭}。
@@ -999,8 +1041,8 @@ class PetWindow(QWidget):
             super().mouseDoubleClickEvent(event)
 
     # ---------- 动作气泡 ----------
-    def _bubble(self, text: str, state: str = "normal"):
-        """桌宠头顶的小气泡：动作执行后的反馈（表情由状态机自己管）。"""
+    def _bubble(self, text: str, state: str = "normal", hold_ms: int = 2000):
+        """桌宠头顶的小气泡：动作反馈 / 聊天流式文本（表情由状态机自己管）。"""
         if not text:
             return
         if self._bubble_lbl is None:
@@ -1018,7 +1060,7 @@ class PetWindow(QWidget):
         lbl.move(max(0, (self.width() - lbl.width()) // 2), 2)
         lbl.show()
         lbl.raise_()
-        self._bubble_timer.start(2000)
+        self._bubble_timer.start(int(hold_ms))
 
     def _hide_bubble(self):
         if self._bubble_lbl is not None:
@@ -1041,6 +1083,78 @@ class PetWindow(QWidget):
                if self.actions.binding("double_tap") else "动作已保存，右键菜单里能用了")
         self._bubble(tip, "surprise")
 
+    # ---------- AI 对话（A1） ----------
+    def _chat_prompt(self):
+        text, ok = QInputDialog.getText(self, "说句话", "想对我说什么？")
+        if ok and text.strip():
+            self._chat_send(text.strip()[:200])
+
+    def _chat_send(self, text: str):
+        if not self.chat_enabled or self._chat_worker is not None:
+            return
+        try:
+            from .chat_worker import ChatWorker
+        except ImportError:
+            from chat_worker import ChatWorker
+        chat = self._chat_cfg.get("chat") or {}
+        try:
+            keep = max(0, int(chat.get("history") or 10)) * 2
+        except (TypeError, ValueError):
+            keep = 20
+        history = self._chat_history[-keep:] if keep else []
+        messages = history + [{"role": "user", "content": text}]
+        persona = (self._chat_cfg.get("skus") or {}).get(self.sku) or {}
+        self._chat_user_text = text
+        self._chat_buf = ""
+        self._chat_streaming = False
+        w = ChatWorker(self._chat_cfg, persona, self.chat_allowed, messages)
+        w.chunk.connect(self._chat_on_chunk)
+        w.done.connect(self._chat_on_done)
+        w.failed.connect(self._chat_on_failed)
+        w.finished.connect(self._chat_on_finished)
+        w.finished.connect(w.deleteLater)
+        self._chat_worker = w
+        w.start()
+
+    def _chat_on_chunk(self, token: str):
+        if not token:
+            return
+        self._chat_streaming = True
+        self._chat_buf += token
+        # 流式内容是 JSON 原文，只把 text 字段的已到达部分冒进气泡
+        self._bubble((partial_text(self._chat_buf) or "…")[-60:], hold_ms=2000)
+
+    def _chat_on_done(self, reply: dict):
+        r = reply if isinstance(reply, dict) else {}
+        text = str(r.get("text") or "")
+        emotion = str(r.get("emotion") or "normal")
+        self.arbiter.request("interaction", "expr", emotion, 3000)
+        if text:
+            self.arbiter.request("interaction", "bubble", text, 6000)
+            self._chat_bubble_text = text
+        self._chat_streaming = False
+        action = str(r.get("action") or "none")
+        if action != "none" and self.actions is not None:
+            self.actions.dispatch(action)
+        if text:
+            self._chat_history.extend([
+                {"role": "user", "content": getattr(self, "_chat_user_text", "")},
+                {"role": "assistant", "content": text},
+            ])
+            chat = self._chat_cfg.get("chat") or {}
+            try:
+                keep = max(0, int(chat.get("history") or 10)) * 2
+            except (TypeError, ValueError):
+                keep = 20
+            if keep and len(self._chat_history) > keep:
+                self._chat_history = self._chat_history[-keep:]
+
+    def _chat_on_failed(self):
+        self._chat_streaming = False
+
+    def _chat_on_finished(self):
+        self._chat_worker = None
+
     def wheelEvent(self, event):
         """滚轮调整大小：向上放大、向下缩小，保持脚底位置。"""
         dy = event.angleDelta().y()
@@ -1057,6 +1171,12 @@ class PetWindow(QWidget):
             bound[menu.addAction(label)] = aid
         if bound:
             menu.addSeparator()
+        if self.chat_enabled:
+            act_chat = menu.addAction("说句话…")
+        else:
+            act_chat = menu.addAction("说句话…（未启用）")
+            act_chat.setEnabled(False)
+        menu.addSeparator()
         act_pause = menu.addAction("继续动画" if self.paused else "暂停动画")
 
         # 表情：随机开关 + 手动试一个（没有眼眶 mask 的素材整项禁用）
@@ -1115,6 +1235,8 @@ class PetWindow(QWidget):
                 self.arbiter.request("interaction", "expr", "normal", 1)
         elif act == act_actions_cfg:
             self._open_action_settings()
+        elif act is not None and act == act_chat:
+            self._chat_prompt()
         elif act == act_pause:
             self.paused = not self.paused
             self.update()

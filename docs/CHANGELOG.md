@@ -2,6 +2,42 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## AI 对话接入（A1，默认关闭）
+
+### 行为变更
+
+- **右键「说句话…」**：流式气泡 + 只写 `expr`；`action` 走 `ActionBridge.dispatch`
+  既有白名单与确认流程。
+- `chat.enabled=false` 时**零网络、不创建 worker**；密钥只从 `key_env` 环境变量读，
+  不落盘、不进日志。
+- `expr` 与最终气泡走既有 `interaction` 源（矩阵无 `agent` 源）；流式窗口只屏蔽
+  `idle→bubble`，`expr/gaze/body` 照常；`arbiter.py` 字节不变。
+- 词表启动时反推一次：只取 `expr_state.STATES`、排除 `blink` / `smile`、按逐 SKU
+  `effects.enabled` 裁剪；**改配置需重启窗口生效**。
+- 无 key / 断网 / 429 / 超时 / 乱码 → 静默回 idle，不弹错误文本。
+
+### 已知增补（原交接文档外）
+
+- `partial_text()`：流式 JSON 只把 `text` 字段的已到达部分冒进气泡，避免先闪
+  `{"text":...}`。抽不到 `text` 时：JSON 头部未到 → 返回空串（气泡显示 `…`）；
+  非 JSON 纯文本 → 回退为可见原文尾部。最终仍由 `safe_parse` 判定，
+  非 JSON 回复静默失败回 idle。
+- system prompt 显式包含小写 `json` 字样，作为 `json_mode=object` 的稳妥条件
+  （只给 `response_format` 不给指令时，部分实现会失败或返回空）。
+
+### 数据格式
+
+- 新增 `desktop_pet/agent.json.example`；真实 `agent.json`、`*.local.json`、`.env`
+  均被 ignore，只提交 example。
+- 不写 manifest、不改 manifest v2；`mouth_dir` 仍是数据槽（运行时未消费）。
+
+### 测试与状态
+
+- 新增 25 条（含 5 条参数化）：108 + 25 = **133 passed**（pre-A1 基线 108，
+  以 `pytest -q` 当前结果为准）。
+- 已实现：A1 对话（默认关闭）；未接线：`mouth_dir`；待 v0.1.1：生成式候选、
+  心跳、滚动摘要、mood_hint。
+
 ## 能力补全向导（首期）
 
 ### 行为变更
@@ -29,7 +65,8 @@
 
 - `pytest -q` = **108 passed**（pre-wizard 基线 93，以 `pytest -q` 当前结果为准）。
 - 三档状态：**已实现** = 六步向导 + 三个补全器；**未接线** = `mouth_dir` 运行时消费；
-  **待拍板** = `smile` 独立状态、`derive_allowed()`、配置期生成式候选（AI 范围页）。
+  **待拍板** = `smile` 独立状态、配置期生成式候选（AI 范围页）。
+  `derive_allowed()` 已在 A1 对话里落地（见上一节）。
 - Step 1 的「smile 缺失」只是体检项，标 `v0.1.1`，**不代表本轮能补**。
 
 ## 摆动收敛（逐区域幅度 / 方向 / bias）
