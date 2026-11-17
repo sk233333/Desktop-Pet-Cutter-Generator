@@ -60,6 +60,9 @@
 - `resolve_asset()` 已返回 `(path, item)`；若调用点已拿到 item，**优先复用**，连重读都省。
   首期 `PetWindow` 增加可选 `item: dict | None = None`：传了直接用；没传才用
   `read_manifest(asset.source.parent / "manifest.json")` 重读。
+- 可选参数默认 `None`，所有既有 `PetWindow` 构造点零改动。
+- 没传而走重读时：重读失败 / 无匹配 item → **静默跳过**，输出与 `74b7ba0` 逐比特一致；
+  不给旧调用点凭空增加一次 manifest IO 的失败面。
 - `asset.source` 为空（直接加载单图）→ 无 item，跳过。
 - 按 `stem` 精确匹配；命中多条 → 跳过并 warn，不猜第一条（Q3）。
 
@@ -100,7 +103,7 @@ class MouthOverlay:
 | 序 | 补丁 | 文件 | 不做什么 |
 |---|---|---|---|
 | T-M1 | `MouthOverlay.load/apply` + 纯逻辑测试 | 新增 `mouth_overlay.py` / `tests/test_mouth_overlay.py` | 不接 PetWindow |
-| T-M2 | 取 item：可选参数 + `read_manifest()` 回退 + 路径守卫 | `pet_window.py` | 不合成、不改签名语义 |
+| T-M2 | 取 item：可选参数（默认 `None`，旧构造点零改动）+ `read_manifest()` 回退 + 路径守卫 | `pet_window.py` | 不合成、不改签名语义；重读失败静默跳过 |
 | T-M3 | `_pick_frame()` 合成（素材分辨率、alpha bbox、hair 之前） | `pet_window.py` | 不动 anim / ExprBank |
 | T-M4 | 尺寸不符 / 损坏 / 缺失三类独立用例 + 五路取帧断言 | 测试 | 不合并参数化 |
 | T-M5 | CHANGELOG / README 差异登记（含 PetPreview 不同步） | 文档 | 不写「已统一」 |
@@ -112,11 +115,12 @@ class MouthOverlay:
 
 | 编号 | 断言 |
 |---|---|
-| C-M1 | 无 `mouth_dir` 时，`_pick_frame` 的 base / blink / expr / gaze 四路输出与 `74b7ba0` 逐字节一致 |
+| C-M1 | **仅 PetWindow 侧**：无 `mouth_dir` 时，`_pick_frame` 的 base / blink / expr / gaze 四路输出与 `74b7ba0` 逐字节一致；**不含** `ui_app.PetPreview`（首期不同步，见 Q4） |
 | C-M2 | 有覆盖层时，alpha bbox 外逐比特不变；bbox 内等于参考 `_over(base, overlay)` |
 | C-M3a | 尺寸不符 → 不崩溃、warn、输出等于 C-M1（独立用例，不与 b/c 合并） |
 | C-M3b | 文件损坏 / 解码失败 → 不崩溃、warn、输出等于 C-M1（独立用例） |
 | C-M3c | 文件缺失 → 不崩溃、warn、输出等于 C-M1（独立用例） |
+| C-M3d | **全透明 PNG（alpha bbox 为空）** → 不崩溃、warn、输出等于 C-M1（独立用例，不并进参数化） |
 | C-M4 | `mouth_dir` 含 `..` 或绝对路径 → 拒绝加载，不读 SKU 目录外文件 |
 | C-M5 | 运行时零 manifest 写入；`git status` 无 manifest / mask PNG 变化 |
 | C-M6 | `anim.py` / `expr_state.py` / `arbiter.py` / manifest v2 / 摆动线零 diff |
@@ -125,7 +129,8 @@ class MouthOverlay:
 | C-M9 | 200 帧离屏（base / blink / expr / gaze 各 50）无异常、无尺寸漂移 |
 | C-M10 | 干净 venv 五包（无 PyQt6）跑 `pytest -q`，≥133 passed，新增测试全部 Qt-free |
 | C-M11 | `mouth_dir` 为空字符串 / `None` / 非字符串 → 按无 overlay 处理，不抛异常 |
-| C-M12 | 覆盖层 alpha 全 0 → 按无 overlay 处理，不加载、不 warn 刷屏 |
+| C-M12 | 覆盖层 alpha 全 0 → 按无 overlay 处理（见 C-M3d），不 warn 刷屏 |
+| C-M13 | 有 / 无 `mouth_dir` 时 `derive_allowed()` 输出逐项相同；**不得**因补嘴型把 `smile` 加进词表 |
 
 ## 6. MUST NOT
 
@@ -142,6 +147,7 @@ class MouthOverlay:
 
 - **Q1 = B**：`PetWindow` 侧取 item；**必须走 `read_manifest()`**，禁止裸 `json.load`；
   只读不写；`resolve_asset()` 已返回 item 时优先复用，否则按 `stem` 精确重读。
+  可选 `item` 默认 `None`，旧构造点零改动；重读失败 / 无匹配 → 静默跳过且输出零回归。
 - **Q2 = 静态常驻**：`mouth_dir` 指向哪一档，就常驻显示哪一档；无 `mouth_dir` 时完全不合成。
   「说话才张嘴」要接 A1 的 chunk 信号切档，是另一条功能，排 v0.1.1，**不估成小改**；
   STATES / 别名表 / `apply()` 签名 / A1 worker 全不碰。
