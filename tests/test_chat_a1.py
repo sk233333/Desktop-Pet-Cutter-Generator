@@ -76,7 +76,7 @@ def _assert_system_payload_has_lower_json(body: dict):
     """
     system = _system_content(body)
     assert system, "payload 缺少 system message"
-    assert "json" in system.lower()
+    assert "json" in system
 
 
 def test_example_has_no_model_id_host_or_key():
@@ -207,6 +207,13 @@ def test_c3_helper_rejects_system_without_json():
     with pytest.raises(AssertionError):
         _assert_system_payload_has_lower_json(
             {"messages": [{"role": "system", "content": "你是一只桌宠。"}]})
+
+
+def test_c3_helper_rejects_uppercase_only_json():
+    """负向自检：只有大写 JSON 也必须失败，与 P0-a 的精确小写同口径。"""
+    with pytest.raises(AssertionError):
+        _assert_system_payload_has_lower_json(
+            {"messages": [{"role": "system", "content": "只输出 JSON。"}]})
 
 
 def test_c3_response_format_alone_is_not_enough():
