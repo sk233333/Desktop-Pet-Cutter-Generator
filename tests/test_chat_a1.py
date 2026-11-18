@@ -59,6 +59,26 @@ class _Resp:
         return iter(self._lines)
 
 
+def _system_content(body: dict) -> str:
+    """只看真正发出的 system message，不看 response_format。"""
+    msgs = body.get("messages")
+    if not isinstance(msgs, list):
+        return ""
+    return "".join(str(m.get("content") or "") for m in msgs
+                   if isinstance(m, dict) and m.get("role") == "system")
+
+
+def _assert_system_payload_has_lower_json(body: dict):
+    """C-3：组装后 payload 的 system content 必须含小写 json。
+
+    不能断言 `"json" in json.dumps(body)`：json_mode=object 时
+    `response_format={"type":"json_object"}` 本身就带 json，prompt 被删光也绿。
+    """
+    system = _system_content(body)
+    assert system, "payload 缺少 system message"
+    assert "json" in system.lower()
+
+
 def test_example_has_no_model_id_host_or_key():
     raw = (ROOT / "desktop_pet" / "agent.json.example").read_text(encoding="utf-8")
     cfg = json.loads(raw)
@@ -154,6 +174,50 @@ def test_json_mode_none_omits_response_format(monkeypatch):
     monkeypatch.setattr(cp.urllib.request, "urlopen", fake)
     list(cp.stream_chat(cfg, "sys", []))
     assert "response_format" not in captured["body"]
+
+
+@pytest.mark.parametrize("json_mode", ["object", "none"])
+def test_c3_sent_system_contains_lower_json(monkeypatch, json_mode):
+    """两种 profile 都断言**真正发出**的 system content。
+
+    object 有 response_format、none 没有；后者只能靠 prompt 里的 json，
+    最容易漏测。
+    """
+    monkeypatch.setenv("A1_TEST_KEY", "dummy")
+    captured = {}
+    cfg = _cfg()
+    cfg["profiles"]["p"]["json_mode"] = json_mode
+
+    def fake(req, timeout=None):
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _Resp(["data: [DONE]"])
+
+    monkeypatch.setattr(cp.urllib.request, "urlopen", fake)
+    sys_msg = cc.build_system_prompt(
+        {"name": "小灰", "persona": "话少", "style": "短"},
+        {"emotion": ["normal", "half"], "action": []})
+    list(cp.stream_chat(cfg, sys_msg, []))
+
+    _assert_system_payload_has_lower_json(captured["body"])
+    assert ("response_format" in captured["body"]) == (json_mode == "object")
+
+
+def test_c3_helper_rejects_system_without_json():
+    """负向自检：没有 json 的 system 必须让断言失败。"""
+    with pytest.raises(AssertionError):
+        _assert_system_payload_has_lower_json(
+            {"messages": [{"role": "system", "content": "你是一只桌宠。"}]})
+
+
+def test_c3_response_format_alone_is_not_enough():
+    """response_format 自带 json，不能让它把 system 断言喂成假绿。"""
+    body = {
+        "messages": [{"role": "system", "content": "你是一只桌宠。"}],
+        "response_format": {"type": "json_object"},
+    }
+    assert "json" in json.dumps(body)          # 整包 dumps 会假绿
+    with pytest.raises(AssertionError):
+        _assert_system_payload_has_lower_json(body)
 
 
 def test_cumulative_stream_yields_only_new_suffix(monkeypatch):
