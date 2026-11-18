@@ -12,7 +12,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-pytest.importorskip("PyQt6")
+pytest.importorskip(
+    "PyQt6",
+    reason="设计结果：本文件 4 条用例需要 QApplication，CI 五包按 D 档不装 "
+           "PyQt6；禁止靠给 CI 加 PyQt6 来消掉这条 skip",
+)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
