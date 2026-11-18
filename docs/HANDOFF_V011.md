@@ -43,9 +43,9 @@
 |---|---|---|---|
 | C-1 | CI 固定 `ubuntu-24.04` + actions 升版 | **仅在确证是 runner 镜像问题后做**；未确证前不动 workflow（见 §7） | 待确证 |
 | C-2 | matplotlib 懒加载 | 模块级零 import、零副作用（含 `CJK_FONT` / `rcParams`）；函数内按需导入。引用数不再写死，改前重新 grep，以提交时 raw 输出为准 | ✅ 已完成 |
-| C-3 | payload 组装后小写 `json` 断言 | A1 已知增补；只补断言，不改 provider 行为 | 未实现 |
-| C-4 | `dir: null` 显式写 vs 省略 key 等价断言 | 摆动参数 sidecar / manifest 各一条 | 未实现 |
-| C-5 | `bias` UI 暴露 | 当前只到数据 + 渲染；补 UI 不改变默认值 | 未实现 |
+| C-3 | payload 组装后小写 `json` 断言 | A1 已知增补；只补断言，不改 provider 行为 | ✅ 已完成 |
+| C-4 | `dir: null` 显式写 vs 省略 key 等价断言 | 摆动参数 sidecar / manifest 各一条 | ✅ 已完成 |
+| C-5 | `bias` UI 暴露 | 逐区域行内偏置，上下限与 `SWAY_RANGES` 同源；调参走 `masks_dirty=False` 只写 JSON；预览复用同一引擎就地更新；未新增 GUI 用例，skip 数保持 1 | ✅ 已完成 |
 | C-6 | `test_pet_window_mouth.py` 唯一 skip 的处置 | 评估无 PyQt6 的 headless 拆分；默认接受该 skip，**不为测试新增 CI 依赖** | ✅ 已完成（仅补 skip 理由） |
 
 > **C-1 确证条件**：某次 push 的 run 变红、且同 commit 干净 venv 五包全绿 → 判为 runner 镜像/依赖，再动 C-1；否则只记录 annotation，不改 workflow。
@@ -70,6 +70,7 @@
 | 把模型权重请回仓库 | 历史已改写；权重外置 |
 | 未确证镜像问题前预防性改 workflow | 先排查，不预改 |
 | 按「前 4 只」批量补 socket | 会把挂件眼当真眼，必须逐张点清 |
+| 不把修订号 / `amp` / `dir` 纳入 `_pet_key`；保留 `apply_params` 就地更新（P1-8） | 会退回重建卡顿；否决项，不是待办 |
 
 ## 6. 外部配额（可选）
 
@@ -90,7 +91,7 @@
 | A-1 ~ A-4 人工作业 | 待人工 |
 | B-1 ~ B-4 边界 | 待拍板 / 未实现 |
 | C-1 镜像相关 | 待确证 |
-| C 档工程维护 | C-1 待确证；C-2 ✅；C-3、C-4、C-6 ✅；C-5 排期 |
+| C 档工程维护 | C-1 待确证；C-2 ✅；C-3、C-4、C-5、C-6 ✅ |
 | D 全程约束 | 生效 |
 | 已否决 | 保持不做 |
 | 外部配额 | 可选，非阻塞 |

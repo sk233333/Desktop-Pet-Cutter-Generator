@@ -17,6 +17,11 @@
 
 两者互不读取。给用户解释或做新功能前，先确认说的是哪一个。
 
+> 分层事实：`amp` / `dir` / `bias` 都落在**逐区域**这一层（`_cut` 项 →
+> `<stem>_hair.json` / `_cloth.json` → manifest `hair` / `cloth`）；
+> `motion.json` 只存**整只桌宠**的 `scale` / `dir`，没有 `bias`。
+> 两者不是一个状态源，UI 也不互相写回。
+
 ---
 
 ## 二、功能清单（当前已实现）
@@ -27,11 +32,13 @@
 - 「摆动」页（约 L3309-3375）：
   - 顶部「类型」下拉：`头发（发缕）` / `衣服 / 小物件`，标注与列表都作用于当前类型；
   - 一个按钮「标注飘动区域…（多边形）」→ `_annotate_sway()`（L5225）按类型进入 `_hair_flow` / `_cloth_flow`；
-  - 统一列表 `tb_sway` 5 列：`类型 | 区域 | 方向 | 幅度 | 末端 (x, y)`；
+  - 统一列表 `tb_sway` 6 列：`类型 | 区域 | 方向 | 幅度 | 偏置 | 末端 (x, y)`；
   - 「删除选中 / 清空」对两类都生效，按行内 `UserRole=(kind, index)` 定位。
 - 逐行参数：
-  - 方向：`ClickComboBox`，选项 `默认、→、↗、↑、↖、←、↙、↓、↘`（`_DIR_CHOICES`，L4228 附近）；屏幕角度：0=右、90=上、180=左、270=下。
-  - 幅度：`ClickSlider`（不响应滚轮）+ 数值标签，0~3.0×，`_amp_cell()`（L4286）；拖动只更新内存并排队预览，停手 600ms 才落盘（`_queue_sway_save`，L4367）。
+  - 方向：`ClickComboBox`，`默认` + 16 档（22.5° 步进；8 个主方向用箭头，其余标角度）；屏幕角度：0=右、90=上、180=左、270=下。
+  - 幅度：`ClickSlider`（不响应滚轮）+ 数值标签，0~3.0×，`_amp_cell()`；拖动只更新内存并排队预览，停手 600ms 才落盘（`_queue_sway_save`）。
+  - 偏置：`ClickSlider` + 数值标签，上下限从 `SWAY_RANGES["bias"]` 派生（−45°~+45°）；写回 `items[i]["bias"]`，与 `amp` / `dir` 同走 `masks_dirty=False` 的 JSON-only 落盘。
+  - 行内控件（方向 / 幅度 / 偏置）被点击时同步选中整行，`_picked_masks()` 不再要求先点单元格。
 
 ### 2. 运行时（`desktop_pet/pet_window.py`）
 
@@ -137,12 +144,12 @@
 > | P1-5 结构性修改整体重建 | 未解决（纯调幅度/方向已不重建） |
 > | P1-6 大图逐帧成本 | 未解决（1024² swing ≈ 14~44ms） |
 > | P1-7 保存重写全部 mask | **已修**：`masks_dirty=False` 只写 JSON |
-> | P1-8 缓存键不含 amp/dir | 未解决（统一入口 `set_sway_params`，风险仍在） |
-> | P1-9 行内控件不选中行 | 未解决 |
+> | P1-8 缓存键不含 amp/dir | **已裁定为有意设计，不修**：`set_sway_params()` 调 `apply_params()` 就地更新，不清 `_pet_key`；裁定见 `HANDOFF_V011.md` 已否决档 |
+> | P1-9 行内控件不选中行 | **已修**：`sliderPressed` / `activated` 时同步 `selectRow(r)` |
 > | P1-10 3×3 叠加到 9× | **已修**：发梢位移上限 14px |
-> | P2-11 无 amp/dir 测试 | **已修**：`tests/test_sway_fields.py`（19 条）+ `test_swing_batch.py`（2 条） |
+> | P2-11 无 amp/dir 测试 | **已修**：`tests/test_sway_fields.py` + `test_swing_batch.py`，条数以 `pytest -q` 为准 |
 > | P2-12 schema 未声明字段 | **已修**：`$defs.swayWisp` + validator + 一致性测试 |
-> | P2-13 只有 8 档 / 无逐区域风力 | 未做 |
+> | P2-13 只有 8 档 / 无逐区域风力 | 部分：方向档位 8 → 16；逐区域风力未做（要改 `anim.py` 物理，红线内不做） |
 > | P2-14 运行时配置全局单文件 | **已修**：按 SKU；旧格式只读降级 |
 
 ### P0：会影响观感或可能穿帮
@@ -180,15 +187,15 @@
 
 7. **保存元数据会重写全部 mask PNG**
    `save_hair_polys()` 每次都会对每个区域 `cv2.imwrite`，即使只改了 `amp`/`dir`；区域多或裁切图大时，600ms 后的那次保存有一次性顿挫，也会改动文件 mtime。
-   建议：拆成「只写 JSON」与「写 mask」两条路径，调参只走 JSON。
+   处理：**已修**——`masks_dirty=False` 只写 JSON，mask 字节与 mtime 不变（调 `amp` / `dir` / `bias` 都走这条）。
 
 8. **`_pet_key` 不含 `amp`/`dir`（有意为之）**
    预览更新完全依赖 `set_sway_params()` 就地改；任何绕过它的代码路径（直接改 `_cut` 后不调预览）都会让画布停在旧参数。
-   建议：给参数加一个轻量修订号并纳入 key，或提供统一的 `apply_sway_to_preview()` 入口。
+   处理：**保持现状**。需要统一入口时只扩 `set_sway_params()` / 预览入口；**不要**把修订号纳入 `_pet_key`——那会退回整引擎重建卡顿，已列入 `HANDOFF_V011.md` 已否决档（P1-8）。
 
 9. **行内控件不触发行选中**
    点拖动条或方向下拉不会选中该行；`_picked_masks()` 依赖 `selectedIndexes()`，所以「删除选中」要先点类型/区域/末端单元格。
-   建议：在 cell widget 的鼠标事件里同步 `selectRow(r)`。
+   处理：**已修**——`sliderPressed` / `activated` 时调 `_touch_sway_row(r)` 同步 `selectRow(r)`。
 
 10. **参数上限叠加**
     逐区域 0~3× 与运行时「夸张 3×」相乘可达 9×；未做整体钳制，极端参数可能出现明显拉伸/越界。
