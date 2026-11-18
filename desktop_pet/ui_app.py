@@ -60,6 +60,7 @@ from anim import (Eye, HairField, HairWisp, blink_group_counts,  # noqa: E402
                   load_eye_masks, make_blink_frames, sway_axis)
 from anim import PetAsset  # noqa: E402
 from expr_state import ExprState  # noqa: E402
+from manifest_io import SWAY_RANGES  # noqa: E402
 from pet_window import PetPack, PetWindow, prefer_xcb  # noqa: E402
 
 SKIP = object()
@@ -1203,11 +1204,28 @@ class PetPreview:
         return base
 
     def set_sway_params(self, hair_params, cloth_params):
-        """逐区域幅度 / 方向就地生效（不重建位移场，拖动幅度条不卡）。"""
-        if self.hair is not None:
-            self.hair.apply_params(hair_params or [])
-        if self.cloth is not None:
-            self.cloth.apply_params(cloth_params or [])
+        """逐区域幅度 / 方向 / 偏置就地生效（不重建位移场，拖动不卡）。
+
+        `apply_params` 只吃 (amp, dir)；bias 直接改已建状态上的浮点数，
+        因此三个参数都能在不重建引擎实例的前提下即时预览。
+        """
+        for field, params in ((self.hair, hair_params),
+                              (self.cloth, cloth_params)):
+            if field is None:
+                continue
+            params = params or []
+            field.apply_params([(p[0], p[1]) for p in params])
+            for s in field.items:
+                i = s.src_index
+                if not (0 <= i < len(params)):
+                    continue
+                p = params[i]
+                b = p[2] if len(p) > 2 else 0.0
+                try:
+                    lo, hi = SWAY_RANGES["bias"]
+                    s.bias = min(hi, max(lo, float(b)))
+                except (TypeError, ValueError):
+                    s.bias = 0.0
 
     def frame(self, dt: float = 0.05) -> np.ndarray:
         """前进一帧，返回这一帧的 RGBA。"""
@@ -3355,9 +3373,9 @@ class LaunchUI(QWidget):
         lbl_sway_list.setStyleSheet("color:#3e4a5c;font-weight:700;font-size:14px;")
         gs.addWidget(lbl_sway_list)
 
-        self.tb_sway = QTableWidget(0, 5)
+        self.tb_sway = QTableWidget(0, 6)
         self.tb_sway.setHorizontalHeaderLabels(
-            ["类型", "区域", "摆动轴（往返）", "幅度", "末端 (x, y)"])
+            ["类型", "区域", "摆动轴（往返）", "幅度", "偏置（°）", "末端 (x, y)"])
         self.tb_sway.horizontalHeaderItem(0).setToolTip(
             "头发 / 衣服：两类共用同一套飘动物理")
         self.tb_sway.horizontalHeaderItem(1).setToolTip(
@@ -3368,6 +3386,9 @@ class LaunchUI(QWidget):
         self.tb_sway.horizontalHeaderItem(3).setToolTip(
             "这块区域自己的摆动幅度：拖动即可调整，0 = 这块不动")
         self.tb_sway.horizontalHeaderItem(4).setToolTip(
+            "这块区域的常值角度偏置（−45°~+45°）：0 = 只有往返摆动，"
+            "正负值让摆动整体偏向一侧")
+        self.tb_sway.horizontalHeaderItem(5).setToolTip(
             "静止时的末端位置（裁切图坐标），用于算摆动力学方向")
         self.tb_sway.verticalHeader().setVisible(False)
         self.tb_sway.setAlternatingRowColors(True)
@@ -3380,9 +3401,11 @@ class LaunchUI(QWidget):
         sv_hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         sv_hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         sv_hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        sv_hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        sv_hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        sv_hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.tb_sway.setColumnWidth(2, 96)
         self.tb_sway.setColumnWidth(3, 132)
+        self.tb_sway.setColumnWidth(4, 150)
         self.tb_sway.verticalHeader().setDefaultSectionSize(34)
         self.tb_sway.setFixedHeight(150)
         self.tb_sway.itemSelectionChanged.connect(self._highlight_selection)
@@ -4237,14 +4260,17 @@ class LaunchUI(QWidget):
 
     # ---------- 飘动区域列表（头发 + 衣服共用） ----------
     # 方向下拉的取值：None = 沿发丝/衣摆法线（原来的行为），其余为屏幕角度
-    _DIR_CHOICES = ((None, "默认"), (0.0, "→"), (45.0, "↗"), (90.0, "↑"),
-                    (135.0, "↖"), (180.0, "←"), (225.0, "↙"),
-                    (270.0, "↓"), (315.0, "↘"))
+    _DIR_CHOICES = ((None, "默认"), (0.0, "→"), (22.5, "22.5°"),
+                    (45.0, "↗"), (67.5, "67.5°"), (90.0, "↑"),
+                    (112.5, "112.5°"), (135.0, "↖"), (157.5, "157.5°"),
+                    (180.0, "←"), (202.5, "202.5°"), (225.0, "↙"),
+                    (247.5, "247.5°"), (270.0, "↓"), (292.5, "292.5°"),
+                    (315.0, "↘"), (337.5, "337.5°"))
 
     def _sync_sway_table(self):
-        """头发与衣服合并到同一张表：类型 | 区域 | 方向 | 幅度 | 末端。
+        """头发与衣服合并到同一张表：类型 | 区域 | 方向 | 幅度 | 偏置 | 末端。
 
-        行内记住 (kind, 下标)；方向与幅度是逐区域参数，直接写回 wisp 字典。
+        行内记住 (kind, 下标)；方向、幅度与偏置都是逐区域参数，直接写回 wisp 字典。
         """
         st = self._cut or {}
         rows = []
@@ -4262,8 +4288,11 @@ class LaunchUI(QWidget):
             it1 = QTableWidgetItem(f"第 {i + 1} {unit}")
             it1.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tb_sway.setItem(r, 1, it1)
-            self.tb_sway.setCellWidget(r, 2, self._dir_cell(kind, i, w))
-            self.tb_sway.setCellWidget(r, 3, self._amp_cell(kind, i, w.get("amp")))
+            self.tb_sway.setCellWidget(r, 2, self._dir_cell(kind, i, w, r))
+            self.tb_sway.setCellWidget(
+                r, 3, self._amp_cell(kind, i, w.get("amp"), r))
+            self.tb_sway.setCellWidget(
+                r, 4, self._bias_cell(kind, i, w.get("bias"), r))
             try:
                 tip = w.get("tip") or (0, 0)
                 txt = f"{float(tip[0]):.0f}, {float(tip[1]):.0f}"
@@ -4271,11 +4300,11 @@ class LaunchUI(QWidget):
                 txt = "-"
             it2 = QTableWidgetItem(txt)
             it2.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tb_sway.setItem(r, 4, it2)
+            self.tb_sway.setItem(r, 5, it2)
         self.tb_sway.blockSignals(False)
         self._highlight_selection()
 
-    def _dir_cell(self, kind: str, i: int, w: dict):
+    def _dir_cell(self, kind: str, i: int, w: dict, row: int = -1):
         """摆动轴下拉；与丝长太近时行内亮出 ⊥，表示实际按垂直分量摆。"""
         cb = ClickComboBox()
         for val, txt in self._DIR_CHOICES:
@@ -4292,8 +4321,13 @@ class LaunchUI(QWidget):
                 pick = k
                 break
         cb.setCurrentIndex(pick)
-        cb.currentIndexChanged.connect(
-            lambda _=0, k=kind, n=i, c=cb: self._set_sway_dir(k, n, c.currentData()))
+
+        def _pick_dir(_=0):
+            self._touch_sway_row(row)
+            self._set_sway_dir(kind, i, cb.currentData())
+
+        cb.currentIndexChanged.connect(_pick_dir)
+        cb.activated.connect(lambda _=0: self._touch_sway_row(row))
         box = QWidget()
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -4326,7 +4360,7 @@ class LaunchUI(QWidget):
         except (KeyError, TypeError, ValueError):
             return False
 
-    def _amp_cell(self, kind: str, i: int, amp):
+    def _amp_cell(self, kind: str, i: int, amp, row: int = -1):
         """每行一个拖动条（0~3.0×）+ 数值；拖动只刷新预览，松手才落盘。"""
         try:
             amp = min(3.0, max(0.0, float(amp)))
@@ -4345,10 +4379,46 @@ class LaunchUI(QWidget):
         lb.setStyleSheet("color:#5a6b7d;font-size:11px;")
         lay.addWidget(sl, 1)
         lay.addWidget(lb, 0)
+        sl.sliderPressed.connect(lambda r=row: self._touch_sway_row(r))
         sl.valueChanged.connect(
             lambda v, k=kind, n=i, l=lb: self._set_sway_amp(k, n, v, l))
         sl.sliderReleased.connect(lambda k=kind: self._save_sway_meta(k))
         return box
+
+    def _bias_cell(self, kind: str, i: int, bias, row: int = -1):
+        """每行一个角度偏置拖动条（上下限与 SWAY_RANGES 同源）+ 数值。"""
+        lo, hi = SWAY_RANGES["bias"]
+        try:
+            bias = min(hi, max(lo, float(bias)))
+        except (TypeError, ValueError):
+            bias = 0.0
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(2, 0, 4, 0)
+        lay.setSpacing(4)
+        sl = ClickSlider(Qt.Orientation.Horizontal)
+        sl.setRange(int(round(lo * 10)), int(round(hi * 10)))
+        sl.setValue(int(round(bias * 10)))
+        sl.setToolTip("这块区域的常值角度偏置：−45°~+45°，0 = 只有往返摆动；"
+                      "拖动只刷新预览，松手才落盘")
+        lb = QLabel(f"{bias:+.1f}°")
+        lb.setFixedWidth(44)
+        lb.setStyleSheet("color:#5a6b7d;font-size:11px;")
+        lay.addWidget(sl, 1)
+        lay.addWidget(lb, 0)
+        sl.sliderPressed.connect(lambda r=row: self._touch_sway_row(r))
+        sl.valueChanged.connect(
+            lambda v, k=kind, n=i, l=lb: self._set_sway_bias(k, n, v, l))
+        sl.sliderReleased.connect(lambda k=kind: self._save_sway_meta(k))
+        return box
+
+    def _touch_sway_row(self, row: int):
+        """点行内控件时同步选中整行（P1-9），不打断已有选中。"""
+        if row < 0:
+            return
+        if row in {ix.row() for ix in self.tb_sway.selectedIndexes()}:
+            return
+        self.tb_sway.selectRow(row)
 
     def _set_sway_amp(self, kind: str, i: int, raw: int, label: QLabel):
         amp = round(max(0.0, min(3.0, raw / 100.0)), 2)
@@ -4368,6 +4438,17 @@ class LaunchUI(QWidget):
         self._queue_sway_preview()
         self._queue_sway_save(kind)
 
+    def _set_sway_bias(self, kind: str, i: int, raw: int, label: QLabel):
+        lo, hi = SWAY_RANGES["bias"]
+        bias = round(max(lo, min(hi, raw / 10.0)), 1)
+        label.setText(f"{bias:+.1f}°")
+        items = (self._cut or {}).get(kind) or []
+        if not (0 <= i < len(items)):
+            return
+        items[i]["bias"] = bias
+        self._queue_sway_preview()
+        self._queue_sway_save(kind)
+
     def _queue_sway_preview(self):
         """拖动幅度时合并刷新：80ms 内只重建一次画布上的桌宠。"""
         if getattr(self, "_sway_preview_pending", False):
@@ -4376,7 +4457,7 @@ class LaunchUI(QWidget):
         QTimer.singleShot(80, self._apply_sway_preview)
 
     def _sway_params(self, kind: str) -> list:
-        """逐区域的 (amp, dir)，过滤规则与 _pet_engine 构位移场时保持一致。"""
+        """逐区域的 (amp, dir, bias)，过滤规则与 _pet_engine 构位移场时保持一致。"""
         st = self._cut or {}
         x0, y0, x1, y1 = st["box"]
         out = []
@@ -4384,12 +4465,16 @@ class LaunchUI(QWidget):
             if not it["mask"][y0:y1, x0:x1].any():
                 continue
             d = it.get("dir")
+            try:
+                b = float(it.get("bias", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                b = 0.0
             out.append((float(it.get("amp", 1.0)),
-                        None if d is None else float(d)))
+                        None if d is None else float(d), b))
         return out
 
     def _apply_sway_preview(self):
-        """只改幅度 / 方向时走轻量路径：就地改参数 + 立刻重画一帧。
+        """只改幅度 / 方向 / 偏置时走轻量路径：就地改参数 + 立刻重画一帧。
 
         以前是清缓存重建整个渲染引擎（权重、距离场、眨眼贴片全部重算），
         拖动幅度条时每 80ms 重建一次，必然卡；现在权重全部复用。
@@ -4426,7 +4511,7 @@ class LaunchUI(QWidget):
             self._save_sway_meta(kind)
 
     def _save_sway_meta(self, kind: str):
-        """只改幅度/方向时落盘：不重建表格、不刷日志，避免打断拖动。"""
+        """只改幅度/方向/偏置时落盘：不重建表格、不刷日志，避免打断拖动。"""
         if not self._cut:
             return
         st = self._cut
