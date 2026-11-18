@@ -34,18 +34,14 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import matplotlib
-if "MPLBACKEND" not in os.environ:
-    matplotlib.use("TkAgg")
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Rectangle
 from PIL import Image
 
 from cutout_to_pet import DEFAULT_CANON, DEFAULT_OUT, build_one, keep_main_parts
 
 def _setup_cjk_font():
     """挑一个系统里真实存在的中文字体，避免标题显示成方块。"""
+    import matplotlib
     from matplotlib import font_manager
 
     available = {f.name for f in font_manager.fontManager.ttflist}
@@ -60,8 +56,22 @@ def _setup_cjk_font():
     return None
 
 
-CJK_FONT = _setup_cjk_font()
-matplotlib.rcParams["axes.unicode_minus"] = False
+CJK_FONT = None
+_CJK_READY = False
+
+
+def _init_cjk_font():
+    """首次出图时才导入 matplotlib，并设置后端 / 中文字体 / 负号。"""
+    global CJK_FONT, _CJK_READY
+    if _CJK_READY:
+        return CJK_FONT
+    import matplotlib
+    if "MPLBACKEND" not in os.environ:
+        matplotlib.use("TkAgg")
+    CJK_FONT = _setup_cjk_font()
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    _CJK_READY = True
+    return CJK_FONT
 
 SKIP = object()  # 用户在可选步骤按 s 跳过
 
@@ -100,6 +110,8 @@ def choose_image() -> str:
 # 交互窗口
 # ------------------------------------------------------------------
 def _new_figure(image, step, hint):
+    _init_cjk_font()
+    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 10))
     fig.suptitle(step, fontsize=14, weight="bold", y=0.995, va="top")
     ax.imshow(image)
@@ -112,6 +124,9 @@ def _new_figure(image, step, hint):
 def pick_rect(image, step, hint, color="lime",
               allow_skip=False, full_key=True):
     """画一个框。返回 (x0,y0,x1,y1)；s -> SKIP；ESC/关窗 -> None。"""
+    _init_cjk_font()
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
     pts, drag = [], {"start": None, "cur": None}
     state = {"box": None, "skip": False, "cancel": False}
 
@@ -217,6 +232,8 @@ def pick_rect(image, step, hint, color="lime",
 
 def pick_points(image, box, step, hint, prev=None):
     """在前景/背景上标点（可带上次的点）。返回 [(x,y,label)]；s -> SKIP；ESC -> None。"""
+    _init_cjk_font()
+    import matplotlib.pyplot as plt
     points = [list(p) for p in prev] if prev else []
     state = {"skip": False, "cancel": False}
 
@@ -286,6 +303,9 @@ def pick_points(image, box, step, hint, prev=None):
 
 def preview_mask(rgb, box, mask, step):
     """四联预览：原图+框 / Mask / 叠加 / 白底。回车采用，a 返回补点，ESC 取消。"""
+    _init_cjk_font()
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
     act = {"value": "cancel"}
     fig, axs = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle(step, fontsize=14, weight="bold", y=0.985)
@@ -862,7 +882,7 @@ def main():
         run_ui()
         return
 
-    if CJK_FONT is None:
+    if _init_cjk_font() is None:
         print("[提示] 未找到中文字体，窗口标题可能显示为方块；"
               "可安装 fonts-noto-cjk 后重试")
 
