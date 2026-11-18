@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from anim import gaze_frame, make_blink_frames, resize_rgba  # noqa: E402
-from mouth_runtime_utils import make_sku, win  # noqa: E402
+from mouth_runtime_utils import ROOT, make_sku, win  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -117,3 +117,25 @@ def test_tm3_expr_uses_render_source(tmp_path):
         assert seen and seen[0] is w._render_rgba
     finally:
         w.close()
+
+
+def test_tm4_zero_writes_and_200_frames(tmp_path):
+    """GUI 专属：真实帧循环跑 200 帧；Qt-free 的文件哈希版在
+    `tests/test_mouth_runtime_ci.py::test_cm5_apply_200_frames_zero_writes`。
+    """
+    d, asset, item, _ = make_sku(tmp_path, mouth=True)
+    paths = [d / "manifest.json", d / "pet.png", d / "pet_mouth_smile.png"]
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+    arbiter_before = (ROOT / "arbiter.py").read_bytes()
+
+    w = win(asset, item)
+    try:
+        for i in range(200):
+            w._update_state(i * 40.0)
+            assert w._pick_frame() is not None
+        assert (ROOT / "arbiter.py").read_bytes() == arbiter_before
+    finally:
+        w.close()
+
+    after = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+    assert before == after
