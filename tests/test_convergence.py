@@ -209,8 +209,10 @@ def test_c12_no_direct_expression_writes():
         assert pat not in src, pat
     assert "arbiter.resolve(" in src
     assert "set_timeline_blink(phase" in src
-    # 全闭眼只留 make_blink_frames 这一份实现（时间轴与 idle 共用）
-    assert 'state == "blink"' in src and "blink_frames()[-1]" in src
+    # 全闭眼只留 make_blink_frames 这一份实现（时间轴与 idle 共用），
+    # 且从已合成的素材分辨率源帧派生，不再回读 asset.blink_frames()
+    assert 'state == "blink"' in src
+    assert "frames = self.raw_blink or self._blink_frames_from(self._render_rgba)" in src
 
 
 def test_c12_preview_uses_shared_phase_function():

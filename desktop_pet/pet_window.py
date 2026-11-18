@@ -53,7 +53,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QInputDialog,
 try:
     from .anim import (HairField, PetAsset, blink_group_counts, blink_phases,
                        compose_group_blink, eye_group_bbox, gaze_frame,
-                       group_eyes, resize_rgba, swing_all)
+                       group_eyes, make_blink_frames, resize_rgba, swing_all)
     from .action_bridge import ActionBridge
     from .arbiter import Arbiter, timeline_phase
     from .chat_contract import (chat_enabled, derive_allowed, load_agent_config,
@@ -65,7 +65,7 @@ try:
 except ImportError:  # 直接以脚本方式运行
     from anim import (HairField, PetAsset, blink_group_counts, blink_phases,
                       compose_group_blink, eye_group_bbox, gaze_frame,
-                      group_eyes, resize_rgba, swing_all)
+                      group_eyes, make_blink_frames, resize_rgba, swing_all)
     from action_bridge import ActionBridge
     from arbiter import Arbiter, timeline_phase
     from chat_contract import (chat_enabled, derive_allowed, load_agent_config,
@@ -187,9 +187,12 @@ class PetWindow(QWidget):
 
         self.pack = pack              # PetPack：多只时由它统一驱动与碰撞
         self.asset = asset
-        # T-M2：只取 item 并加载覆盖层；T-M3 才在 _pick_frame() 里合成
+        # T-M2：只取 item 并加载覆盖层；T-M3：素材分辨率合成一次，四路共用
         self._mouth = self._load_mouth_overlay(item)
-        self.raw_blink = asset.blink_frames() if (blink and asset.blink_on) else []
+        self._render_rgba = (self._mouth.apply(asset.rgba)
+                             if self._mouth is not None else asset.rgba)
+        self.raw_blink = (self._blink_frames_from(self._render_rgba)
+                          if (blink and asset.blink_on) else [])
         self.blink_enabled = blink and bool(self.raw_blink)
         self.animate = animate
         self.paused = False
@@ -326,13 +329,13 @@ class PetWindow(QWidget):
                              self.y() + self.margin + self.ay)
 
         self.display_height = height
-        self.base = to_pixmap(self.asset.rgba, height)
+        self.base = to_pixmap(self._render_rgba, height)
         self._expr_rgba.clear()          # 显示尺寸变了，表情帧缓存作废
         self._expr_pixmaps.clear()
         self._swing_cache = None         # 摆动帧按旧尺寸烘焙，一并作废
         self.blink_pixmaps = [to_pixmap(f, height) for f in self.raw_blink]
         # 头发飘动要按显示尺寸重采样 RGBA，位移场也按显示尺寸烘焙
-        self.base_rgba = resize_rgba(self.asset.rgba, self.base.height())
+        self.base_rgba = resize_rgba(self._render_rgba, self.base.height())
         # 碰撞用的主体包围盒（不含窗口透明边距）：按不透明像素算，
         # 再留几像素余量覆盖呼吸/摇摆的轻微形变，避免边缘刚好蹭到
         alpha = self.base_rgba[:, :, 3]
@@ -614,10 +617,11 @@ class PetWindow(QWidget):
         预览端（ui_app）仍是另一套，留到 T6 收。
         """
         if state not in self._expr_pixmaps:
-            if state == "blink" and self.asset.blink_frames():
-                base = self.asset.blink_frames()[-1]
+            if state == "blink":
+                frames = self.raw_blink or self._blink_frames_from(self._render_rgba)
+                base = frames[-1] if frames else self._render_rgba
             else:
-                base = self.asset.expr_bank().apply(self.asset.rgba, state)
+                base = self.asset.expr_bank().apply(self._render_rgba, state)
             # 贴片是在素材分辨率上烘焙的，先在原尺寸合成再缩到显示高度
             f = resize_rgba(base, self.base.height())
             self._expr_rgba[state] = f
@@ -769,6 +773,13 @@ class PetWindow(QWidget):
                 pass
         return "default"
 
+    def _blink_frames_from(self, rgba: np.ndarray) -> list[np.ndarray]:
+        """与 `PetAsset.blink_frames()` 同口径，但用传入的素材分辨率帧。"""
+        idx = self.asset.active_eyes
+        eyes = self.asset.eyes if idx is None else [
+            self.asset.eyes[i] for i in idx if 0 <= i < len(self.asset.eyes)]
+        return make_blink_frames(rgba, eyes) if eyes else []
+
     def _load_mouth_overlay(self, item: dict | None):
         """T-M2：取 manifest item 并只读加载嘴型覆盖层；不在这里合成。
 
@@ -888,7 +899,7 @@ class PetWindow(QWidget):
         if arr is None:
             pairs = self._gaze_geo_pairs()
             arr = resize_rgba(
-                gaze_frame(self.asset.rgba, [e for e, _ in pairs], gx, gy,
+                gaze_frame(self._render_rgba, [e for e, _ in pairs], gx, gy,
                            geos=[g for _, g in pairs]),
                 self.base.height())
             if len(self.gaze_rgba_cache) >= 16:

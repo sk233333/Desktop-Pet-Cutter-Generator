@@ -217,5 +217,13 @@ def test_files_fallback_warn_once(tmp_path, capsys):
     assert capsys.readouterr().err.count("files 精确兜底") == 1
 
 
+def test_pet_window_has_one_mouth_apply_point():
+    src = (ROOT / "desktop_pet" / "pet_window.py").read_text(encoding="utf-8")
+    assert src.count("self._mouth.apply(") == 1
+    start = src.index("    def _pick_frame(")
+    end = src.index("\n    def ", start + 10)
+    assert "self._mouth.apply(" not in src[start:end]
+
+
 def test_warn_module_exists():
     assert hasattr(mouth_overlay, "MouthOverlay")
