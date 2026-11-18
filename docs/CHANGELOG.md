@@ -15,8 +15,11 @@
 
 ### 测试与状态
 
-- 本地 `pytest -q` 以实际输出为准；`tests/test_pet_window_mouth.py` 需 PyQt6，
-  CI 五包会整体 skip 该文件。
+- 集成断言（C-M1 四路 golden、C-M3a~d 四类失败、C-M5 200 次 apply 零写盘、
+  C-M6 保护模块、C-M7 状态表/签名、C-M8 双 SKU）在 Qt-free
+  `tests/test_mouth_runtime_ci.py`，CI 五包会真跑；仅需 QApplication 的 200 帧
+  真实帧循环留在 `tests/test_pet_window_mouth.py`，CI 五包只 skip 这一个文件。
+- 本地 `pytest -q` 以实际输出为准。
 - 已实现：静态常驻运行时合成；未做：说话驱动切档、编辑器 `PetPreview` 同步。
 
 ## AI 对话接入（A1，默认关闭）

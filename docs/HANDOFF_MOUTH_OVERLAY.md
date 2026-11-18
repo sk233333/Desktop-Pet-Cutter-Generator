@@ -97,6 +97,14 @@ class MouthOverlay:
 
 ### 3.4 为什么在素材分辨率源帧合成，而不是 `_pick_frame()`
 
+> **T-M3 实现裁定：采用源帧统一叠加（A 方案）。**
+> 读码事实：四路取帧到汇合点时已是显示尺寸，字面在 `_pick_frame()` 插入
+> 会因 `MouthOverlay.load` 的 size 不符而静默返回原数组，不崩不报。
+> 实现：`__init__` 中一次 `_render_rgba = _mouth.apply(asset.rgba)`，
+> `base / base_rgba / raw_blink / expr / gaze` 四路均从该源帧派生；
+> `_pick_frame()` 零改动；Q2 静态常驻，一次合成即够。
+> **原「`_pick_frame()` 唯一合成点」表述作废，以本节为准。**
+
 - `_pick_frame()` 的 base / blink / expr / gaze 取到时都已是**显示尺寸**
   （`resize_rgba` 已在各自缓存里发生），汇合点之后没有缩放；在那里插 `apply`
   会因尺寸不符静默失效（也就是 T-M2 契约警告的那条）。
@@ -111,7 +119,7 @@ class MouthOverlay:
 | T-M1 | `MouthOverlay.load/apply` + 纯逻辑测试 | 新增 `mouth_overlay.py` / `tests/test_mouth_overlay.py` | 不接 PetWindow |
 | T-M2 | 取 item：可选参数（默认 `None`，旧构造点零改动）+ `read_manifest()` 回退 + 路径守卫 | `pet_window.py` | 不合成、不改签名语义；重读失败静默跳过 |
 | T-M3 | 素材分辨率源帧合成（`_render_rgba`），四路派生 | `pet_window.py` | 不改 `_pick_frame` / anim / ExprBank |
-| T-M4 | 尺寸不符 / 损坏 / 缺失 / 全透明四类独立用例 + 四路断言 + 200 帧零写盘 | 测试 | 不合并参数化 |
+| T-M4 | 四类失败 + 四路 golden + 文件哈希 + 双 SKU 下沉到 Qt-free `tests/test_mouth_runtime_ci.py`；仅 200 帧真实 `_pick_frame` 留在 GUI 文件 | 测试 | 不合并参数化；不在 CI 里 skip 集成断言 |
 | T-M5 | CHANGELOG / README / 本文件同步（含 PetPreview 不同步） | 文档 | 不写「已统一」 |
 | T-M6 | 干净 venv + 离屏 200 帧 + 干净树 | — | 不加依赖 |
 
@@ -139,19 +147,19 @@ class MouthOverlay:
 
 | 编号 | 断言 |
 |---|---|
-| C-M1 | **仅 PetWindow 侧**：无 `mouth_dir` 时，`_pick_frame` 的 base / blink / expr / gaze 四路输出与 `74b7ba0` 逐字节一致；**不含** `ui_app.PetPreview`（首期不同步，见 Q4） |
+| C-M1 | **仅 PetWindow 侧**：无 `mouth_dir` 时，base / blink / expr / gaze 四路输出与 `74b7ba0` 逐字节一致；**不含** `ui_app.PetPreview`（首期不同步，见 Q4）。CI 版在 `tests/test_mouth_runtime_ci.py::test_cm1_*`。**比较层级**：逐比特成立在**缩放前的素材分辨率源帧**；显示尺寸会被 `resize_rgba` 重采样整帧，只用于确认识别得到覆盖层颜色，不做逐比特 |
 | C-M2 | 有覆盖层时，alpha bbox 外逐比特不变；bbox 内按「src alpha 混 RGB、dst alpha 原样保留」与参考一致 |
-| C-M3a | 尺寸不符 → 不崩溃、warn、输出等于 C-M1（独立用例，不与 b/c 合并） |
-| C-M3b | 文件损坏 / 解码失败 → 不崩溃、warn、输出等于 C-M1（独立用例） |
-| C-M3c | 文件缺失 → 不崩溃、warn、输出等于 C-M1（独立用例） |
-| C-M3d | **全透明 PNG（alpha bbox 为空）** → 不崩溃、warn、输出等于 C-M1（独立用例，不并进参数化） |
+| C-M3a | 尺寸不符 → 不崩溃、warn、输出等于 C-M1（独立用例，不与 b/c 合并；CI 版 `test_cm3_bad_overlay_falls_back[size]`） |
+| C-M3b | 文件损坏 / 解码失败 → 不崩溃、warn、输出等于 C-M1（独立用例；CI 版 `[corrupt]`） |
+| C-M3c | 文件缺失 → 不崩溃、warn、输出等于 C-M1（独立用例；CI 版 `[missing]`） |
+| C-M3d | **全透明 PNG（alpha bbox 为空）** → 不崩溃、warn、输出等于 C-M1（独立用例；CI 版 `[transparent]`） |
 | C-M4 | `mouth_dir` 含 `..` 或绝对路径 → 拒绝加载，不读 SKU 目录外文件 |
-| C-M5 | 运行时零 manifest 写入；`git status` 无 manifest / mask PNG 变化 |
-| C-M6 | `anim.py` / `expr_state.py` / `arbiter.py` / manifest v2 / 摆动线零 diff |
-| C-M7 | `STATES` 六态、`smile → half` 别名、`apply()` 签名不变；不新增 `mouth` 状态 |
-| C-M8 | 两条 SKU：一条有 overlay、一条无；互不串图 |
-| C-M9 | 200 帧离屏（base / blink / expr / gaze 各 50）无异常、无尺寸漂移 |
-| C-M10 | 干净 venv 五包（无 PyQt6）跑 `pytest -q`，不低于当前基线；Qt-free 用例全过，`test_pet_window_mouth.py` 整体 skip |
+| C-M5 | 运行时零 manifest 写入；`git status` 无 manifest / mask PNG 变化。CI 版 `test_cm5_apply_200_frames_zero_writes` 比对字节 + mtime |
+| C-M6 | `anim.py` / `expr_state.py` / `arbiter.py` / manifest v2 / 摆动线零 diff；CI 版额外断言这些模块不引用 `mouth_overlay` |
+| C-M7 | `STATES` 六态、`smile → half` 别名、`apply()` 签名不变；不新增 `mouth` 状态（CI 版 `test_cm7_*`） |
+| C-M8 | 两条 SKU：一条有 overlay、一条无；互不串图（CI 版 `test_cm8_*`） |
+| C-M9 | 200 帧离屏（base / blink / expr / gaze 各 50）无异常、无尺寸漂移；真实帧循环留在 GUI 文件 |
+| C-M10 | 干净 venv 五包（无 PyQt6）跑 `pytest -q`，不低于当前基线；Qt-free 用例全过，**仅 `test_pet_window_mouth.py` 一个文件整体 skip（skip ≤ 1）** |
 | C-M11 | `mouth_dir` 为空字符串 / `None` / 非字符串 → 按无 overlay 处理，不抛异常 |
 | C-M12 | 覆盖层 alpha 全 0 → 按无 overlay 处理（见 C-M3d），不 warn 刷屏 |
 | C-M13 | 有 / 无 `mouth_dir` 时 `derive_allowed()` 输出逐项相同；**不得**因补嘴型把 `smile` 加进词表 |
@@ -189,8 +197,9 @@ class MouthOverlay:
 | T-M1 `MouthOverlay` | ✅ `4e10451` |
 | T-M2 取 item / 加载 | ✅ `18c8937` |
 | T-M3 素材分辨率源帧合成 | ✅ T-M3 提交（`pet_window.py` + 测试） |
-| T-M4 四类失败 + 200 帧零写盘 | ✅ T-M4 提交（`tests/test_mouth_runtime_failures.py`） |
-| T-M5 文档同步 | ✅ T-M5 提交 |
-| T-M6 干净 venv / 干净树 | ✅ 验收记录见 T-M5 提交说明 |
+| T-M4 四类失败 + 200 帧零写盘 | ✅ 原始提交 `0bf4a66`；CI 下沉 `6c63658`（Qt-free `tests/test_mouth_runtime_ci.py`，skip 2 → 1） |
+| T-M5 文档同步 | ✅ T-M5 提交 `de70718` |
+| T-M6 干净 venv / 干净树 | ✅ 干净 venv `171 passed, 1 skipped`（仅 PyQt6 GUI 文件）；本地 `175 passed` |
+| CI 集成断言下沉（P0） | ✅ `6c63658`：C-M1 / C-M3a~d / C-M5~C-M8 在 CI 五包真跑；GUI 文件只留 200 帧 |
 | `mouth_dir` 数据槽 | ✅ 已由桌面运行时静态消费；编辑器 `PetPreview` 仍不同步 |
 | A1 / 向导 / 摆动线 / tag | 🔒 不动 |
