@@ -2,11 +2,22 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
-## 边界登记（未实现，不计行为变更）
+## 嘴型 overlay 运行时（T-M3 ~ T-M5）
 
-- 嘴型 overlay：首期只计划在桌面运行时合成；编辑器 `PetPreview` 自带取帧管线，
-  不走 `PetWindow._pick_frame()`，首期不同步，按「显式接受差异」处理。
-  边界与断言见 `docs/HANDOFF_MOUTH_OVERLAY.md`。
+### 行为变更
+
+- `items[].mouth_dir` 指向的 PNG 在桌面运行时**静态常驻**：素材分辨率合成一次，
+  `base / blink / expr / gaze` 四路全部从合成后的源帧派生；无 `mouth_dir` 时完全不合成。
+- 合成只读：不改 `asset.rgba`、不写 manifest、不改 mask PNG；失败（尺寸不符 / 损坏 /
+  缺失 / 全透明）一律按无 overlay 处理，基础帧零变化。
+- 编辑器 `PetPreview` 仍是独立取帧管线，**首期不同步**，按「显式接受差异」处理。
+- 边界与断言见 `docs/HANDOFF_MOUTH_OVERLAY.md`。
+
+### 测试与状态
+
+- 本地 `pytest -q` 以实际输出为准；`tests/test_pet_window_mouth.py` 需 PyQt6，
+  CI 五包会整体 skip 该文件。
+- 已实现：静态常驻运行时合成；未做：说话驱动切档、编辑器 `PetPreview` 同步。
 
 ## AI 对话接入（A1，默认关闭）
 
@@ -35,14 +46,14 @@
 
 - 新增 `desktop_pet/agent.json.example`；真实 `agent.json`、`*.local.json`、`.env`
   均被 ignore，只提交 example。
-- 不写 manifest、不改 manifest v2；`mouth_dir` 仍是数据槽（运行时未消费）。
+- 不写 manifest、不改 manifest v2；`mouth_dir` 此时仅为数据槽，运行时消费由后续
+  嘴型 overlay 落地。
 
 ### 测试与状态
 
-- 新增 25 条（含 5 条参数化）：108 + 25 = **133 passed**（pre-A1 基线 108，
-  以 `pytest -q` 当前结果为准）。
-- 已实现：A1 对话（默认关闭）；未接线：`mouth_dir`；待 v0.1.1：生成式候选、
-  心跳、滚动摘要、mood_hint。
+- A1 交付时为 **133 passed**（pre-A1 基线 108，历史值；以 `pytest -q` 为准）。
+- 已实现：A1 对话（默认关闭）；`mouth_dir` 的运行时消费在后续嘴型 overlay 落地；
+  待 v0.1.1：生成式候选、心跳、滚动摘要、mood_hint。
 
 ## 能力补全向导（首期）
 
@@ -56,23 +67,24 @@
   列成可见清单；`smile` 标 `v0.1.1` 且不可勾选，不自动关 Issue。
 - **落盘闸门**：逐候选 `commit` 只返回 `ChangeSet`，由 `upgrade_core` 统一
   过 `validate_manifest`、原子写、失败整体回滚；路径锁死在当前 SKU 目录。
-- **`allowed` 只产提案**：`derive_allowed()` 未实现前不写运行时词表，
-  提案不含 `smile` / `blink`。
+- **`allowed` 只产提案**：运行时词表由 `derive_allowed()` 从 `expr_state.STATES` +
+  `ActionBridge.registry` + `effects.enabled` 反推；向导提案不写词表，且不含
+  `smile` / `blink`。
 
 ### 数据格式
 
 - v1 manifest 首次落盘时走 `manifest_io.v1_to_v2` 同一迁移入口，转 v2 后再
   应用补丁；不另写转换。
-- `items[]` 可带可选 `mouth_dir` / `mouth_level`；**当前为数据槽，运行时未消费**
-  （`anim.build_expr_bank()` 未传 `mouth_dir`，接线需显式放行，排 v0.1.1）；
+- `items[]` 可带可选 `mouth_dir` / `mouth_level`；运行时由 `PetWindow` 在
+  素材分辨率合成（见「嘴型 overlay 运行时」节），`anim.build_expr_bank()` 不参与；
   `ExprBank.STATES` 与 `smile → half` 别名不变。
 
 ### 测试与状态
 
-- `pytest -q` = **108 passed**（pre-wizard 基线 93，以 `pytest -q` 当前结果为准）。
-- 三档状态：**已实现** = 六步向导 + 三个补全器；**未接线** = `mouth_dir` 运行时消费；
+- 向导交付时为 **108 passed**（pre-wizard 基线 93，历史值；以 `pytest -q` 为准）。
+- 三档状态：**已实现** = 六步向导 + 三个补全器；**已接线** = `mouth_dir` 静态常驻；
   **待拍板** = `smile` 独立状态、配置期生成式候选（AI 范围页）。
-  `derive_allowed()` 已在 A1 对话里落地（见上一节）。
+  `derive_allowed()` 已在 A1 对话里落地，向导提案不写词表。
 - Step 1 的「smile 缺失」只是体检项，标 `v0.1.1`，**不代表本轮能补**。
 
 ## 摆动收敛（逐区域幅度 / 方向 / bias）

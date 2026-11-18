@@ -1,6 +1,6 @@
 # 嘴型 overlay 运行时渲染 · 边界文档
 
-> 状态：**边界已定、Q1–Q4 已裁定，仓库零代码改动**。本轮只落文档，不产补丁。
+> 状态：**T-M1 ~ T-M5 已落，T-M6 已验收**。运行时按素材分辨率源帧合成。
 > 关联基线：`origin/main = 74b7ba0`（A1 已结案）；`pytest -q` 133 passed；
 > `tag v0.1` = tag 对象 `fe5d76f` → commit `b03cdb7`（未动）。
 > 定位：**新功能**，不是「接线」，不是收尾。`mouth.open` 已实现的是**产数据**；
@@ -88,17 +88,21 @@ class MouthOverlay:
 ### 3.3 `PetWindow` 接线（唯一改动的现有文件）
 
 1. `__init__`：解析 `mouth_dir` → `MouthOverlay.load(...)`，失败只打一行 warning；
-2. `_pick_frame()`：在 `src` 选定后、`_hair_active()` 之前：
-   `if self._mouth is not None: src = self._mouth.apply(src)`；
-3. 不新增 UI 开关；`mouth_level` 只用于日志/报告，v1 不参与切换；
-4. 覆盖层只在素材分辨率合成，随后照旧 `resize_rgba` 到显示高度。
+2. **素材分辨率源帧**：`self._render_rgba = self._mouth.apply(asset.rgba)`，
+   全局只此一处 `apply`；原 `asset.rgba` 不改；
+3. `base / base_rgba / raw_blink / expr / gaze` 全部从 `_render_rgba` 派生；
+   `_pick_frame()` 零改动；
+4. 不新增 UI 开关；`mouth_level` 只用于日志/报告，v1 不参与切换；
+5. 覆盖层在素材分辨率合成一次，随后照旧 `resize_rgba` 到显示高度。
 
-### 3.4 为什么放在 `_pick_frame` 而不是 `ExprBank`
+### 3.4 为什么在素材分辨率源帧合成，而不是 `_pick_frame()`
 
-- `ExprBank` 是**表情贴片库**，六个状态 + 一个共用 socket；嘴型是**独立图层**，
-  塞进去会逼着新增状态或改 `apply()`，正好踩中前几轮的 MUST NOT；
-- `_pick_frame` 是五条取帧路径的唯一汇合点，一处合成即可覆盖 blink / gaze / expr；
-- 以后真要按状态切嘴型，也只需在这一层加映射，不动 `STATES`。
+- `_pick_frame()` 的 base / blink / expr / gaze 取到时都已是**显示尺寸**
+  （`resize_rgba` 已在各自缓存里发生），汇合点之后没有缩放；在那里插 `apply`
+  会因尺寸不符静默失效（也就是 T-M2 契约警告的那条）。
+- 所以在 `__init__` 对 `asset.rgba` 合成一次，四路从 `_render_rgba` 派生；
+  既保住「素材分辨率合成后再缩放」，也只有一个合成点。
+- `ExprBank` 仍是表情贴片库，嘴型是独立图层；不新增状态、不改 `apply()` 签名。
 
 ## 4. 补丁顺序（T-M1 ~ T-M6）
 
@@ -106,12 +110,12 @@ class MouthOverlay:
 |---|---|---|---|
 | T-M1 | `MouthOverlay.load/apply` + 纯逻辑测试 | 新增 `mouth_overlay.py` / `tests/test_mouth_overlay.py` | 不接 PetWindow |
 | T-M2 | 取 item：可选参数（默认 `None`，旧构造点零改动）+ `read_manifest()` 回退 + 路径守卫 | `pet_window.py` | 不合成、不改签名语义；重读失败静默跳过 |
-| T-M3 | `_pick_frame()` 合成（素材分辨率、alpha bbox、hair 之前） | `pet_window.py` | 不动 anim / ExprBank |
-| T-M4 | 尺寸不符 / 损坏 / 缺失三类独立用例 + 五路取帧断言 | 测试 | 不合并参数化 |
-| T-M5 | CHANGELOG / README 差异登记（含 PetPreview 不同步） | 文档 | 不写「已统一」 |
-| T-M6 | 干净 venv + 离屏 200 帧冒烟 | — | 不加依赖 |
+| T-M3 | 素材分辨率源帧合成（`_render_rgba`），四路派生 | `pet_window.py` | 不改 `_pick_frame` / anim / ExprBank |
+| T-M4 | 尺寸不符 / 损坏 / 缺失 / 全透明四类独立用例 + 四路断言 + 200 帧零写盘 | 测试 | 不合并参数化 |
+| T-M5 | CHANGELOG / README / 本文件同步（含 PetPreview 不同步） | 文档 | 不写「已统一」 |
+| T-M6 | 干净 venv + 离屏 200 帧 + 干净树 | — | 不加依赖 |
 
-每一步单独可回滚；T-M3 之前 `mouth_dir` 仍不消费，旧行为零变化。
+每一步单独可回滚；T-M3 之后无 `mouth_dir` 的 SKU 仍与旧行为逐比特一致。
 
 ### T-M1 补钉（已并入 T-M1 commit）
 
@@ -123,8 +127,9 @@ class MouthOverlay:
 
 ### T-M2 接线契约（下一轮，不改 T-M1）
 
-- `load(size)` 的 `size` 必须是**原始素材分辨率**；`_pick_frame()` 在缩放前调 `apply()`。
-  传显示帧会命中「尺寸不符」静默返回原数组——不崩，但看起来像没生效。
+- `load(size)` 的 `size` 必须是**原始素材分辨率**；合成为素材分辨率源帧（`__init__`
+  一次），`_pick_frame()` 不调用 `apply()`。传显示帧会命中「尺寸不符」静默返回
+  原数组——不崩，但看起来像没生效。
 - `mouth_dir` + `mouth_level` 拼出的 name 必须整体过 `load()` 的路径守卫，
   不在拼接处绕过（例如 `mouth_level` 带 `..`）。
 - 可选 `item` 默认 `None`、旧构造点零改动；`resolve_asset()` 已返回 item 时优先复用；
@@ -146,7 +151,7 @@ class MouthOverlay:
 | C-M7 | `STATES` 六态、`smile → half` 别名、`apply()` 签名不变；不新增 `mouth` 状态 |
 | C-M8 | 两条 SKU：一条有 overlay、一条无；互不串图 |
 | C-M9 | 200 帧离屏（base / blink / expr / gaze 各 50）无异常、无尺寸漂移 |
-| C-M10 | 干净 venv 五包（无 PyQt6）跑 `pytest -q`，≥133 passed，新增测试全部 Qt-free |
+| C-M10 | 干净 venv 五包（无 PyQt6）跑 `pytest -q`，不低于当前基线；Qt-free 用例全过，`test_pet_window_mouth.py` 整体 skip |
 | C-M11 | `mouth_dir` 为空字符串 / `None` / 非字符串 → 按无 overlay 处理，不抛异常 |
 | C-M12 | 覆盖层 alpha 全 0 → 按无 overlay 处理（见 C-M3d），不 warn 刷屏 |
 | C-M13 | 有 / 无 `mouth_dir` 时 `derive_allowed()` 输出逐项相同；**不得**因补嘴型把 `smile` 加进词表 |
@@ -181,7 +186,11 @@ class MouthOverlay:
 | 项 | 状态 |
 |---|---|
 | 本文件（边界 + 契约 + 断言 + Q1–Q4 裁定） | ✅ 已落盘 |
-| docs 小提交 | ✅ 本次提交（仅两份文档） |
-| 可运行代码 / 测试 | ❌ 未产，仓库零代码改动 |
-| `mouth_dir` 数据槽 | 🔒 仍未被运行时消费；下一轮从 T-M1 起 |
+| T-M1 `MouthOverlay` | ✅ `4e10451` |
+| T-M2 取 item / 加载 | ✅ `18c8937` |
+| T-M3 素材分辨率源帧合成 | ✅ T-M3 提交（`pet_window.py` + 测试） |
+| T-M4 四类失败 + 200 帧零写盘 | ✅ T-M4 提交（`tests/test_mouth_runtime_failures.py`） |
+| T-M5 文档同步 | ✅ T-M5 提交 |
+| T-M6 干净 venv / 干净树 | ✅ 验收记录见 T-M5 提交说明 |
+| `mouth_dir` 数据槽 | ✅ 已由桌面运行时静态消费；编辑器 `PetPreview` 仍不同步 |
 | A1 / 向导 / 摆动线 / tag | 🔒 不动 |
