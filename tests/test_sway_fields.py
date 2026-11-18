@@ -8,12 +8,14 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from anim import (MAX_SWAY_SHIFT_PX, HairField, HairWisp,
                   hair_from_dicts, inward_factor, sway_axis, swing_all)
 from cutout_to_pet import load_hair_sidecar, map_hair_wisps
 from launch import save_hair_polys
-from manifest_io import SWAY_DEFAULTS, SWAY_RANGES, validate_manifest
+from manifest_io import (SWAY_DEFAULTS, SWAY_RANGES, read_manifest,
+                         validate_manifest)
 from motion_cfg import load_motion, save_motion
 
 S = 96
@@ -354,3 +356,88 @@ def test_motion_cfg_legacy_flat_is_read_only(tmp_path):
     save_motion(p, "cat", 1.0, None)         # 用户主动改才写新格式
     data = json.loads(p.read_text())
     assert data["skus"]["cat"] == {"scale": 1.0, "dir": None}
+
+
+# ---------- C-4：dir 省略 key 与显式 null 在读入后等价 ----------
+
+def _write_sway_sidecar(d: Path, kind: str, *, explicit_null: bool):
+    """写一份 <stem>_<kind>.json + mask；两种写法只差 dir 键是否存在。"""
+    d.mkdir()
+    mask = np.zeros((S, S), np.uint8)
+    mask[20:60, 30:44] = 255
+    cv2.imwrite(str(d / f"t_{kind}1.png"), mask)
+    wisp = {"mask": f"t_{kind}1.png", "pivot": [37, 20], "tip": [37, 60]}
+    if explicit_null:
+        wisp["dir"] = None
+    data = {"image_size": [S, S], "wisps": [wisp]}
+    (d / f"t_{kind}.json").write_text(json.dumps(data), encoding="utf-8")
+    return d
+
+
+@pytest.mark.parametrize("kind", ["hair", "cloth"])
+def test_c4_sidecar_omitted_dir_equals_explicit_null(tmp_path, kind):
+    """字节必然不等；断言读入后的语义一致（C-S6 改判的那一层）。"""
+    a = _write_sway_sidecar(tmp_path / f"omitted_{kind}", kind,
+                            explicit_null=False)
+    b = _write_sway_sidecar(tmp_path / f"null_{kind}", kind,
+                            explicit_null=True)
+    assert (a / f"t_{kind}.json").read_bytes() != \
+        (b / f"t_{kind}.json").read_bytes()
+
+    ga = load_hair_sidecar(a / "t.png", (S, S, 3), kind=kind)
+    gb = load_hair_sidecar(b / "t.png", (S, S, 3), kind=kind)
+    assert ga and gb
+    assert ga[0].get("dir") is None
+    assert gb[0].get("dir") is None
+    # 读入后完全一致（mask 是数组，逐项比）
+    assert ga[0].keys() == gb[0].keys()
+    assert np.array_equal(ga[0]["mask"], gb[0]["mask"])
+    for field in ("pivot", "tip", "amp", "bias"):
+        assert ga[0].get(field) == gb[0].get(field)
+
+
+def _write_sway_manifest(d: Path, key: str, *, explicit_null: bool):
+    d.mkdir()
+    mask = np.zeros((S, S), np.uint8)
+    mask[20:60, 30:44] = 255
+    cv2.imwrite(str(d / f"a_{key}1.png"), mask)
+    wisp = {"mask": f"a_{key}1.png", "pivot": [37, 20], "tip": [37, 60]}
+    if explicit_null:
+        wisp["dir"] = None
+    data = {
+        "schema_version": 2,
+        "items": [{
+            "stem": "a",
+            "parts": [{"id": "eye1", "channel": "R", "group": "g1",
+                       "mask": "eye1.png"}],
+            key: [wisp],
+        }],
+    }
+    p = d / "manifest.json"
+    p.write_text(json.dumps(data), encoding="utf-8")
+    return d, p
+
+
+@pytest.mark.parametrize("key", ["hair", "cloth"])
+def test_c4_manifest_omitted_dir_equals_explicit_null(tmp_path, key):
+    """manifest v2 两条写法都要过校验，并映射到同一个运行时 dir=None。"""
+    da, pa = _write_sway_manifest(tmp_path / f"omitted_{key}", key,
+                                  explicit_null=False)
+    db, pb = _write_sway_manifest(tmp_path / f"null_{key}", key,
+                                  explicit_null=True)
+    ma, mb = read_manifest(pa), read_manifest(pb)
+
+    for m in (ma, mb):
+        ok, msg = validate_manifest(m)
+        assert ok, msg
+        assert m["items"][0][key][0].get("dir") is None
+
+    # 省略时键不存在、显式时键存在且为 None；语义等价
+    assert "dir" not in ma["items"][0][key][0]
+    assert mb["items"][0][key][0]["dir"] is None
+
+    wa = hair_from_dicts(ma["items"][0][key], base_dir=da)
+    wb = hair_from_dicts(mb["items"][0][key], base_dir=db)
+    assert len(wa) == len(wb) == 1
+    assert wa[0].dir is None and wb[0].dir is None
+    assert (wa[0].amp, wa[0].bias) == (wb[0].amp, wb[0].bias)
