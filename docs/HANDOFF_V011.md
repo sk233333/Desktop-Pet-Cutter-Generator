@@ -46,7 +46,7 @@
 | C-3 | payload 组装后小写 `json` 断言 | A1 已知增补；只补断言，不改 provider 行为 | 未实现 |
 | C-4 | `dir: null` 显式写 vs 省略 key 等价断言 | 摆动参数 sidecar / manifest 各一条 | 未实现 |
 | C-5 | `bias` UI 暴露 | 当前只到数据 + 渲染；补 UI 不改变默认值 | 未实现 |
-| C-6 | `test_pet_window_mouth.py` 唯一 skip 的处置 | 评估无 PyQt6 的 headless 拆分；默认接受该 skip，**不为测试新增 CI 依赖** | 未实现 |
+| C-6 | `test_pet_window_mouth.py` 唯一 skip 的处置 | 评估无 PyQt6 的 headless 拆分；默认接受该 skip，**不为测试新增 CI 依赖** | ✅ 已完成（仅补 skip 理由） |
 
 > **C-1 确证条件**：某次 push 的 run 变红、且同 commit 干净 venv 五包全绿 → 判为 runner 镜像/依赖，再动 C-1；否则只记录 annotation，不改 workflow。
 
