@@ -2,6 +2,8 @@
 
 对应审阅清单 C-S1 ~ C-S9。测试不依赖 PyQt6，CI（无 Qt 环境）也能跑。
 """
+import hashlib
+import inspect
 import json
 import math
 from pathlib import Path
@@ -19,6 +21,7 @@ from manifest_io import (SWAY_DEFAULTS, SWAY_RANGES, read_manifest,
 from motion_cfg import load_motion, save_motion
 
 S = 96
+ROOT = Path(__file__).resolve().parent.parent / "desktop_pet"
 
 
 def _rgba():
@@ -441,3 +444,98 @@ def test_c4_manifest_omitted_dir_equals_explicit_null(tmp_path, key):
     assert len(wa) == len(wb) == 1
     assert wa[0].dir is None and wb[0].dir is None
     assert (wa[0].amp, wa[0].bias) == (wb[0].amp, wb[0].bias)
+
+
+# ---------- C-5：bias 行内控件 / 落盘分层 / 预览不重建 ----------
+
+def _func_body(src: str, name: str) -> str:
+    start = src.index(f"def {name}(")
+    end = src.find("\n    def ", start + 10)
+    return src[start:] if end < 0 else src[start:end]
+
+
+def test_c5_bias_ui_limits_share_sway_ranges():
+    """控件上下限与 validator 同源，不在 UI 里手填第二套区间。"""
+    src = (ROOT / "ui_app.py").read_text(encoding="utf-8")
+    cell = _func_body(src, "_bias_cell")
+    setter = _func_body(src, "_set_sway_bias")
+    preview = _func_body(src, "set_sway_params")
+    assert 'lo, hi = SWAY_RANGES["bias"]' in cell
+    assert "setRange(int(round(lo * 10)), int(round(hi * 10)))" in cell
+    assert 'lo, hi = SWAY_RANGES["bias"]' in setter
+    assert 'lo, hi = SWAY_RANGES["bias"]' in preview
+
+
+def test_c5_bias_meta_only_keeps_masks_untouched(tmp_path):
+    """只调 bias 时走 masks_dirty=False：JSON 变，mask 字节与 mtime 都不变。"""
+    w = _mk_source(tmp_path)[0]
+    save_hair_polys(tmp_path, "t", (S, S), [w], (0, 0), force=True)
+    png = tmp_path / "t_hair1.png"
+    before, mtime = png.read_bytes(), png.stat().st_mtime_ns
+
+    w["bias"] = -30.0
+    save_hair_polys(tmp_path, "t", (S, S), [w], (0, 0), force=True,
+                    masks_dirty=False)
+    assert png.read_bytes() == before
+    assert png.stat().st_mtime_ns == mtime
+    data = json.loads((tmp_path / "t_hair.json").read_text())
+    assert abs(data["wisps"][0]["bias"] + 30.0) < 1e-6
+
+
+def test_c5_bias_roundtrip_two_skus(tmp_path):
+    """两个 SKU 各写各的 bias，读回不串台。"""
+    for sku, b in (("a", -20.0), ("b", 35.0)):
+        d = tmp_path / sku
+        d.mkdir()
+        w = _mk_source(d)[0]
+        w["bias"] = b
+        save_hair_polys(d, "t", (S, S), [w], (0, 0), force=True)
+    ga = load_hair_sidecar(tmp_path / "a" / "t.png", (S, S, 3))
+    gb = load_hair_sidecar(tmp_path / "b" / "t.png", (S, S, 3))
+    assert abs(ga[0]["bias"] + 20.0) < 1e-6
+    assert abs(gb[0]["bias"] - 35.0) < 1e-6
+
+
+def test_c5_preview_reuses_cached_engine():
+    """命中缓存时只就地改参数；清 _pet_key 重建只允许出现在未命中回退。"""
+    src = (ROOT / "ui_app.py").read_text(encoding="utf-8")
+    body = _func_body(src, "_apply_sway_preview")
+    assert 'eng = getattr(self, "_pet_engine_cache", None)' in body
+    assert "eng.set_sway_params(" in body
+    assert "self._pet_engine_cache =" not in body
+    assert body.index("eng.set_sway_params(") < body.index("self._pet_key = None")
+
+
+def test_c5_bias_is_per_region_not_motion_cfg():
+    """分层事实：bias 是 wisp / sidecar 参数，motion_cfg 只管整只 scale/dir。"""
+    ui = (ROOT / "ui_app.py").read_text(encoding="utf-8")
+    launch_src = (ROOT / "launch.py").read_text(encoding="utf-8")
+    motion_src = (ROOT / "motion_cfg.py").read_text(encoding="utf-8")
+    assert 'items[i]["bias"] = bias' in ui
+    assert 'entry["bias"]' in launch_src
+    assert "bias" not in motion_src
+
+
+_PROTECTED_SHA256 = {
+    "anim.py": "c20598180ab41f834adf824e26875c85c16d7030aa27e01814803bddde4da85a",
+    "arbiter.py": "08d812e95dc46d01e3f31d02fb72bb8b15a7bd7fb6cb02539fda8b3c35a0497d",
+    "expr_state.py": "9e2803b48c425fbb00c564e8780bc59bf8fa6daa471fd22bb461958955c185db",
+}
+_WORKFLOW_SHA256 = "2f1b3cd6b663b87cf373386ec417e92385e342baf08995e908774bf2c3314b3a"
+
+
+def test_c5_protected_files_byte_identical():
+    for name, want in _PROTECTED_SHA256.items():
+        got = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+        assert got == want, f"{name} 被改动（D 档红线）"
+    wf = ROOT.parent / ".github" / "workflows" / "tests.yml"
+    assert hashlib.sha256(wf.read_bytes()).hexdigest() == _WORKFLOW_SHA256
+
+
+def test_c5_state_table_and_alias_unchanged():
+    from expr_state import STATES, ExprState
+
+    assert STATES == ("normal", "blink", "half", "surprise", "wink_l", "wink_r")
+    assert "'smile': 'half'" in inspect.getsource(ExprState.from_agent)
+    assert list(inspect.signature(HairField.apply_params).parameters) == [
+        "self", "params"]
