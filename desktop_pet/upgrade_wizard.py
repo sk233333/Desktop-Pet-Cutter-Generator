@@ -248,7 +248,8 @@ class UpgradeWizard(QDialog):
         self.tb_health.setColumnWidth(2, max(320, self.tb_health.columnWidth(2)))
         self.lb_health.setText(
             f"共 {len(rows)} 项；Issue #1/#2 只做入口展示，不自动关单。"
-            "smile 标 v0.1.1，本轮不可勾选。")
+            "smile 独立状态标 v0.1.1，本轮不可勾选；"
+            "几何数据槽见 Step 2（只产数据）。")
 
     def _batch_report(self):
         if self._info is None:
@@ -332,6 +333,20 @@ class UpgradeWizard(QDialog):
             cb.currentTextChanged.connect(
                 lambda txt, c=cand: self._set_mouth(c, txt))
             self.pick_layout.addWidget(cb)
+        elif cand.kind == "smile_geometry":
+            self.pick_layout.addWidget(
+                QLabel("微笑几何档位（只产数据，不改状态表）："))
+            cb = QComboBox()
+            for key in cand.payload.get("presets") or []:
+                cb.addItem(key)
+            cb.setCurrentText(cand.payload.get("preset") or "medium")
+            cb.currentTextChanged.connect(
+                lambda txt, c=cand: self._set_smile(c, txt))
+            self.pick_layout.addWidget(cb)
+            lb = QLabel("产出：独立覆盖层 PNG + items[].smile_geometry；"
+                        "runtime_consumer=null（未接线）")
+            lb.setWordWrap(True)
+            self.pick_layout.addWidget(lb)
         else:
             note = cand.note or "只读提示：不写盘"
             lb = QLabel(note)
@@ -358,6 +373,10 @@ class UpgradeWizard(QDialog):
 
     def _set_mouth(self, cand, text):
         cand.payload["selected"] = text
+        self._refresh_current_preview()
+
+    def _set_smile(self, cand, text):
+        cand.payload["preset"] = text
         self._refresh_current_preview()
 
     def _refresh_current_preview(self):

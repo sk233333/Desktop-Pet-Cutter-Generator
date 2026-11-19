@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from completers import mask_domain_hint, mask_ellipse, mouth_open
+from completers import (mask_domain_hint, mask_ellipse, mouth_open,
+                        smile_geometry)
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ _BUILTIN = (
           "只读候选框：把「哪只可能是真眼」摆给人看，不写盘"),
     Entry("mouth.open", mouth_open, "通用", "低",
           "补 mouth_dir 空槽：独立覆盖层 PNG（闭 / 微笑 / 小 o）"),
+    Entry("expr.smile_geometry", smile_geometry, "通用", "低",
+          "配置期补微笑几何：眼轻眯 / 嘴角弧 / 腮红 alpha；只产数据，未接线"),
 )
 
 REGISTRY: dict[str, Entry] = {e.id: e for e in _BUILTIN}

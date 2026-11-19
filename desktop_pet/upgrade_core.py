@@ -140,14 +140,15 @@ def health_items(info: SkuInfo) -> list[dict]:
          "status": "pending",
          "detail": "SWAY_AXIS_PARALLEL_DEG=25 未对真实素材标定；本轮只展示",
          "selectable": False},
-        {"id": "bias", "label": "bias 未暴露到 UI",
-         "status": "pending",
-         "detail": "数据与渲染已支持，UI 入口仍是 P0-1 遗留；本轮只展示",
+        {"id": "bias", "label": "bias 行内控件（C-5）",
+         "status": "ok",
+         "detail": "已在「摆动」页暴露，上下限与 SWAY_RANGES 同源；"
+                   "本行仅保留可见性",
          "selectable": False},
-        {"id": "smile", "label": "smile 缺失",
+        {"id": "smile", "label": "smile 独立状态",
          "status": "v0.1.1",
-         "detail": "待状态拍板；apply() 现有 smile→half 别名，"
-                   "本轮不可补、不可勾选",
+         "detail": "待 B-2 拍板；B-1 只产几何数据槽（未接线），"
+                   "不改 STATES / 别名表，状态仍不可勾选",
          "selectable": False},
     ])
     return rows
