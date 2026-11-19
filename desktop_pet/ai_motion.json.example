@@ -1,0 +1,11 @@
+{
+  "base_url": "<OpenAI 兼容服务的 chat/completions 根地址，由用户按服务方文档填写>",
+  "model": "<由用户按服务方文档填写>",
+  "key_env": "DESKTOP_PET_AI_MOTION_KEY",
+  "api_key": "",
+  "timeout_ms": 30000,
+  "json_mode": true,
+  "thinking": false,
+  "temperature": 0.6,
+  "max_tokens": 1600
+}

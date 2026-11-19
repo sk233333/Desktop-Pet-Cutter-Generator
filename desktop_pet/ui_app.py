@@ -30,8 +30,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from PyQt6.QtCore import (QEventLoop, QLineF, QPointF, QRectF, QSize, Qt, QTimer,
-                          pyqtSignal)
+from PyQt6.QtCore import (QEventLoop, QLineF, QPointF, QRectF, QSize, Qt, QThread,
+                          QTimer, pyqtSignal)
 from PyQt6.QtGui import (QBrush, QColor, QFont, QIcon, QImage, QLinearGradient,
                          QPainter, QPainterPath, QPen, QPixmap, QPolygonF,
                          QTextCursor)
@@ -61,7 +61,7 @@ from anim import (Eye, HairField, HairWisp, blink_group_counts,  # noqa: E402
                   load_eye_masks, make_blink_frames, sway_axis)
 from anim import PetAsset  # noqa: E402
 from expr_state import ExprState  # noqa: E402
-from manifest_io import SWAY_RANGES  # noqa: E402
+from manifest_io import SWAY_RANGES, read_manifest  # noqa: E402
 from pet_window import PetPack, PetWindow, prefer_xcb  # noqa: E402
 
 SKIP = object()
@@ -880,6 +880,23 @@ class GearButton(RoundIconButton):
         p.drawEllipse(c, r * 0.42, r * 0.42)
 
 
+class AIModelButton(RoundIconButton):
+    """AI：打开「模型接口」弹窗（地址 / 模型 ID / 密钥）。"""
+
+    def __init__(self, parent=None):
+        super().__init__(
+            "模型接口：API 地址 / 模型 ID / 密钥（保存在本地 ai_motion.json）",
+            parent)
+
+    def _glyph(self, p: QPainter, c: QPointF, r: float):
+        f = QFont("Arial")
+        f.setPixelSize(max(10, int(r * 0.82)))
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r),
+                   Qt.AlignmentFlag.AlignCenter, "AI")
+
+
 def make_empty_state(text: str, hint: str = "") -> QWidget:
     """空状态引导：小猫插画 + 一行说明，别堆元素抢信息。"""
     box = QWidget()
@@ -905,6 +922,404 @@ def make_empty_state(text: str, hint: str = "") -> QWidget:
 
 class Cancelled(Exception):
     """用户在交互中按了 ESC。"""
+
+
+class _AIMotionWorker(QThread):
+    """把一次 AI 动作参数请求放到后台线程，UI 事件循环继续转。"""
+
+    ready = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, provider, request, config, parent=None):
+        super().__init__(parent)
+        self._provider = provider
+        self._request = request
+        self._config = config
+
+    def run(self):
+        from ai_motion_contract import AIGenError, propose_motion
+        try:
+            proposal = propose_motion(self._provider, self._request, self._config)
+        except AIGenError as exc:
+            self.failed.emit(str(exc))
+            return
+        except Exception:                        # noqa: BLE001
+            self.failed.emit("AI 动作生成异常，已回退为手动")
+            return
+        self.ready.emit(proposal)
+
+
+class _AIPingWorker(QThread):
+    """模型接口「测试连接」：后台发一条极短请求，不冻结弹窗。"""
+
+    ok = pyqtSignal(str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self._config = config
+
+    def run(self):
+        from ai_motion_contract import AIGenError
+        from ai_motion_provider import HttpMotionProvider
+        try:
+            HttpMotionProvider().ping(self._config)
+        except AIGenError as exc:
+            self.failed.emit(str(exc))
+            return
+        except Exception:                        # noqa: BLE001
+            self.failed.emit("连通性测试异常")
+            return
+        self.ok.emit("连接成功")
+
+
+def _fmt_num(v) -> str:
+    if v is None:
+        return "—"
+    try:
+        return f"{float(v):g}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+class _AIMotionDialog(QDialog):
+    """逐项勾选 AI 建议：未勾选的字段保持 manifest 原值。"""
+
+    def __init__(self, parent, item: dict, proposal):
+        super().__init__(parent)
+        from ai_motion_contract import ANIM_RANGES
+
+        self.setWindowTitle("AI 生成动作参数")
+        self.selected: list[str] = []
+        lay = QVBoxLayout(self)
+        tip = QLabel("AI 只给参数，不发明状态；默认全不选，勾选才会写入，"
+                     "未勾选的保持原值。")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color:#8d99a8;")
+        lay.addWidget(tip)
+
+        area = QScrollArea(self)
+        area.setWidgetResizable(True)
+        body = QWidget()
+        grid = QGridLayout(body)
+        row = 0
+        cur_anim = item.get("anim") if isinstance(item.get("anim"), dict) else {}
+        grid.addWidget(QLabel("<b>动作参数</b>"), row, 0)
+        row += 1
+        for key in ANIM_RANGES:
+            cb = QCheckBox(f"{key}: {_fmt_num(cur_anim.get(key))} → "
+                           f"{_fmt_num(proposal.anim.get(key))}")
+            cb.setChecked(False)
+            cb.setProperty("sel", f"anim/{key}")
+            grid.addWidget(cb, row, 0)
+            row += 1
+        for kind, label in (("hair", "头发"), ("cloth", "衣物")):
+            ws = item.get(kind) or []
+            if not ws:
+                continue
+            grid.addWidget(QLabel(f"<b>逐区域摆动 · {label}</b>"), row, 0)
+            row += 1
+            for i, w in enumerate(ws):
+                p = proposal.sway.get(kind) or []
+                p = p[i] if i < len(p) else {}
+                cb = QCheckBox(
+                    f"{label} {i + 1}: amp {_fmt_num(w.get('amp'))} → "
+                    f"{_fmt_num(p.get('amp'))}；dir {_fmt_num(w.get('dir'))} → "
+                    f"{_fmt_num(p.get('dir'))}；bias {_fmt_num(w.get('bias'))} → "
+                    f"{_fmt_num(p.get('bias'))}")
+                cb.setChecked(False)
+                cb.setProperty("sel", f"sway/{kind}/{i}")
+                grid.addWidget(cb, row, 0)
+                row += 1
+        if proposal.expressions:
+            grid.addWidget(QLabel("<b>表情覆盖层（joy / sleepy）</b>"), row, 0)
+            row += 1
+            for state, params in proposal.expressions.items():
+                text = ", ".join(f"{k}={_fmt_num(v)}" for k, v in params.items())
+                cb = QCheckBox(f"{state}: {text}")
+                cb.setChecked(False)
+                cb.setProperty("sel", f"expr/{state}")
+                grid.addWidget(cb, row, 0)
+                row += 1
+        grid.setRowStretch(row, 1)
+        area.setWidget(body)
+        lay.addWidget(area, 1)
+
+        for warning in proposal.warnings:
+            lb = QLabel("提示：" + warning)
+            lb.setWordWrap(True)
+            lb.setStyleSheet("color:#8d99a8;")
+            lay.addWidget(lb)
+
+        btns = QHBoxLayout()
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("应用选中项")
+        ok.setObjectName("primary")
+        ok.clicked.connect(self._accept)
+        btns.addStretch(1)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
+        lay.addLayout(btns)
+        self.resize(720, 540)
+
+    def _accept(self):
+        self.selected = [cb.property("sel") for cb in self.findChildren(QCheckBox)
+                         if cb.isChecked() and cb.property("sel")]
+        if not self.selected:
+            QMessageBox.information(self, "AI 生成参数", "至少勾选一项")
+            return
+        self.accept()
+
+
+class _AICutPromptDialog(QDialog):
+    """AI 抠图前问「要切成什么」；跳过 = 按画面主体切。"""
+
+    def __init__(self, parent=None, initial_outline=True):
+        super().__init__(parent)
+        self.result_text = None          # None=取消；""=跳过
+        self.subject_text = ""
+        self.outline = bool(initial_outline)
+        self._manual_outline = False
+        self.setWindowTitle("AI 识别抠图")
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        head = QLabel("要切成什么？")
+        f = QFont()
+        f.setPointSize(13)
+        f.setBold(True)
+        head.setFont(f)
+        lay.addWidget(head)
+
+        tip = QLabel("描述要保留的主体（如「中间的兔子」），只用于提示你框选，"
+                     "不会上传；切割由框和下面的黑边选项决定。")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color:#8d99a8;")
+        lay.addWidget(tip)
+
+        self.ed = QPlainTextEdit()
+        self.ed.setPlaceholderText("例如：只保留中间的兔子")
+        self.ed.setFixedHeight(90)
+        self.ed.textChanged.connect(self._sync_outline)
+        lay.addWidget(self.ed)
+
+        self.ck_outline = QCheckBox("贴内层黑边（去掉外层白边/贴纸边）")
+        self.ck_outline.setToolTip(
+            "沿主体内部的黑色描边填满，去掉外面的白色贴纸边；"
+            "没有黑边时会自动回退到 SAM/GrabCut")
+        self.ck_outline.setChecked(self.outline)
+        self.ck_outline.clicked.connect(self._mark_manual)
+        lay.addWidget(self.ck_outline)
+
+        btns = QHBoxLayout()
+        skip = QPushButton("跳过（直接框选）")
+        skip.clicked.connect(self._skip)
+        btns.addWidget(skip)
+        btns.addStretch(1)
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(cancel)
+        ok = QPushButton("开始框选")
+        ok.setObjectName("primary")
+        ok.clicked.connect(self._accept)
+        btns.addWidget(ok)
+        lay.addLayout(btns)
+        self.resize(560, 340)
+
+    def _mark_manual(self, *_):
+        self._manual_outline = True
+
+    def _sync_outline(self):
+        """描述里出现「白边/黑边/描边」时自动勾选；用户手动改过就不抢。"""
+        if self._manual_outline:
+            return
+        from ai_cut_box import split_edge_instruction
+        _, wants = split_edge_instruction(self.ed.toPlainText())
+        if wants:
+            self.ck_outline.setChecked(True)
+
+    def _skip(self):
+        self.result_text = ""
+        self.subject_text = ""
+        self.outline = self.ck_outline.isChecked()
+        self.accept()
+
+    def _accept(self):
+        from ai_cut_box import split_edge_instruction
+        subject, _ = split_edge_instruction(self.ed.toPlainText())
+        self.subject_text = subject
+        self.outline = self.ck_outline.isChecked()
+        self.result_text = subject
+        self.accept()
+
+
+class _AIModelDialog(QDialog):
+    """模型接口：地址 / 模型 ID / 密钥 + 连通性测试，写到本地 ai_motion.json。"""
+
+    def __init__(self, parent, cfg):
+        super().__init__(parent)
+        from dataclasses import replace
+
+        self._base = cfg
+        self._replace = replace
+        self.result_cfg = None
+        self._worker = None
+
+        self.setWindowTitle("模型接口")
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        head = QLabel("模型接口")
+        f = QFont()
+        f.setPointSize(13)
+        f.setBold(True)
+        head.setFont(f)
+        lay.addWidget(head)
+        sub = QLabel("「AI 生成参数…」使用的 OpenAI Chat Completions 兼容服务；"
+                     "密钥只保存在本地 ai_motion.json（已 gitignore）。")
+        sub.setWordWrap(True)
+        sub.setStyleSheet("color:#8d99a8;")
+        lay.addWidget(sub)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        r = 0
+        grid.addWidget(QLabel("API 格式"), r, 0)
+        fmt = QComboBox()
+        fmt.addItem("OpenAI Chat Completions 格式")
+        fmt.setEnabled(False)
+        grid.addWidget(fmt, r, 1)
+        r += 1
+
+        grid.addWidget(QLabel("请求地址 *"), r, 0)
+        self.ed_url = QLineEdit(cfg.base_url)
+        self.ed_url.setPlaceholderText("例如 https://api.openai.com/v1")
+        grid.addWidget(self.ed_url, r, 1)
+        r += 1
+        tip = QLabel("/chat/completions 会自动补到地址末尾")
+        tip.setStyleSheet("color:#8d99a8;font-size:11px;")
+        grid.addWidget(tip, r, 1)
+        r += 1
+
+        grid.addWidget(QLabel("模型 ID *"), r, 0)
+        self.ed_model = QLineEdit(cfg.model)
+        self.ed_model.setPlaceholderText("例如 gpt-4o-mini / qwen-vl-plus")
+        grid.addWidget(self.ed_model, r, 1)
+        r += 1
+        tip_model = QLabel("AI 识别抠图需要该模型支持图片输入；纯文本模型只能用于生成动作参数")
+        tip_model.setWordWrap(True)
+        tip_model.setStyleSheet("color:#8d99a8;font-size:11px;")
+        grid.addWidget(tip_model, r, 1)
+        r += 1
+
+        grid.addWidget(QLabel("输出上限"), r, 0)
+        self.sp_max = QSpinBox()
+        self.sp_max.setRange(64, 8192)
+        self.sp_max.setSingleStep(64)
+        self.sp_max.setValue(max(64, int(cfg.max_tokens)))
+        self.sp_max.setToolTip(
+            "推理模型会先输出思考内容；只拿到思考内容时把它调大（如 2048）")
+        grid.addWidget(self.sp_max, r, 1)
+        r += 1
+
+        grid.addWidget(QLabel("API 密钥 *"), r, 0)
+        row = QHBoxLayout()
+        self.ed_key = QLineEdit(cfg.api_key)
+        self.ed_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ed_key.setPlaceholderText("输入 API Key")
+        row.addWidget(self.ed_key, 1)
+        self.btn_eye = QPushButton("显示")
+        self.btn_eye.setFixedWidth(56)
+        self.btn_eye.setCheckable(True)
+        self.btn_eye.toggled.connect(self._toggle_key)
+        row.addWidget(self.btn_eye)
+        grid.addLayout(row, r, 1)
+        lay.addLayout(grid)
+
+        key_env = cfg.key_env or "DESKTOP_PET_AI_MOTION_KEY"
+        if os.environ.get(key_env, "").strip():
+            env_hint = f"环境变量 {key_env} 已设置，将优先于这里填写的密钥"
+        else:
+            env_hint = f"也可以不改这里，改用环境变量 {key_env}"
+        lb_env = QLabel(env_hint)
+        lb_env.setWordWrap(True)
+        lb_env.setStyleSheet("color:#8d99a8;font-size:11px;")
+        lay.addWidget(lb_env)
+
+        self.lb_status = QLabel("")
+        self.lb_status.setWordWrap(True)
+        lay.addWidget(self.lb_status)
+
+        btns = QHBoxLayout()
+        self.btn_test = QPushButton("测试连接")
+        self.btn_test.clicked.connect(self._test)
+        btns.addWidget(self.btn_test)
+        btns.addStretch(1)
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(cancel)
+        self.btn_save = QPushButton("保存")
+        self.btn_save.setObjectName("primary")
+        self.btn_save.clicked.connect(self._save)
+        btns.addWidget(self.btn_save)
+        lay.addLayout(btns)
+        self.resize(560, 460)
+
+    def _toggle_key(self, shown: bool):
+        self.ed_key.setEchoMode(QLineEdit.EchoMode.Normal if shown
+                                else QLineEdit.EchoMode.Password)
+        self.btn_eye.setText("隐藏" if shown else "显示")
+
+    def _current_cfg(self):
+        return self._replace(
+            self._base,
+            base_url=self.ed_url.text().strip(),
+            model=self.ed_model.text().strip(),
+            api_key=self.ed_key.text().strip(),
+            max_tokens=int(self.sp_max.value()))
+
+    def _set_busy(self, busy: bool):
+        for w in (self.btn_test, self.btn_save, self.ed_url, self.ed_model,
+                  self.ed_key, self.sp_max):
+            w.setEnabled(not busy)
+
+    def _test(self):
+        from ai_motion_contract import validate_config
+
+        cfg = self._current_cfg()
+        issues = validate_config(cfg)
+        if issues:
+            self.lb_status.setText("；".join(issues))
+            return
+        self._set_busy(True)
+        self.lb_status.setText("正在测试连接…")
+        self._worker = _AIPingWorker(cfg, self)
+        self._worker.ok.connect(self._on_ping_ok)
+        self._worker.failed.connect(self._on_ping_failed)
+        self._worker.start()
+
+    def _on_ping_ok(self, msg: str):
+        self._set_busy(False)
+        self.lb_status.setStyleSheet("color:#3f9c8b;")
+        self.lb_status.setText(msg)
+
+    def _on_ping_failed(self, msg: str):
+        self._set_busy(False)
+        self.lb_status.setStyleSheet("color:#c0504d;")
+        self.lb_status.setText(f"连接失败：{msg}")
+
+    def _save(self):
+        from ai_motion_contract import validate_config
+
+        cfg = self._current_cfg()
+        issues = validate_config(cfg)
+        if issues:
+            QMessageBox.information(self, "模型接口", "；".join(issues))
+            return
+        self.result_cfg = cfg
+        self.accept()
 
 
 # ------------------------------------------------------------------
@@ -949,16 +1364,6 @@ class LogWriter:
 
     def flush(self):
         pass
-
-
-def _local_ai_status() -> tuple[bool, str]:
-    """主界面可用性检查：只查依赖是否安装，不 import rembg（太重）。"""
-    import importlib.util
-
-    if importlib.util.find_spec("rembg") is None:
-        return False, ("未安装本地分割依赖 rembg（可选安装，不进仓库）；"
-                       "手动框选不受影响")
-    return True, ""
 
 
 class PreviewBoard(QWidget):
@@ -3061,6 +3466,9 @@ class LaunchUI(QWidget):
         head.setSpacing(8)
         head.addWidget(self.step_label, 1)
         # 输出参数收进齿轮：主界面只留步骤和预览
+        self.btn_ai_model = AIModelButton()
+        self.btn_ai_model.clicked.connect(self._open_ai_model)
+        head.addWidget(self.btn_ai_model, 0, Qt.AlignmentFlag.AlignTop)
         self.btn_settings = GearButton()
         self.btn_settings.clicked.connect(lambda: self._open_settings())
         head.addWidget(self.btn_settings, 0, Qt.AlignmentFlag.AlignTop)
@@ -3210,25 +3618,27 @@ class LaunchUI(QWidget):
             "background:#fbfeff;border:2px dashed #dbe9f7;border-radius:16px;"
             "color:#aab6c4;")
         v.addWidget(self.lbl_thumb)
-        # 抠图方式：默认手动；本地 AI 只替换「框取 + 抠图」，后续标注完全共用
+        # 抠图方式：默认手动；AI 只替换「框取」，后续标注完全共用
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
         mode_row.addWidget(QLabel("抠图方式"))
         self.rb_cut_manual = QRadioButton("手动框选")
-        self.rb_cut_ai = QRadioButton("本地 AI 抠图")
+        self.rb_cut_ai = QRadioButton("AI 切割（框手动）")
         self.rb_cut_manual.setChecked(True)
-        ready, why = _local_ai_status()
-        self._local_ai_ready = ready
-        if not ready:
-            self.rb_cut_ai.setEnabled(False)
-            self.rb_cut_ai.setToolTip(why)
-        else:
-            self.rb_cut_ai.setToolTip(
-                "纯本地推理、不上传；首次使用会下载模型到 ~/.u2net，之后可离线")
+        self.rb_cut_ai.setToolTip(
+            "框仍由你手动画，SAM/GrabCut 只负责框内像素切割；"
+            "AI 不再猜框，也不会把图片发给模型接口")
         for rb in (self.rb_cut_manual, self.rb_cut_ai):
             rb.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             rb.toggled.connect(self._sync_cut_mode)
             mode_row.addWidget(rb)
+        self.ck_outline = QCheckBox("贴内层黑边")
+        self.ck_outline.setToolTip(
+            "AI 切割时沿主体内层黑色描边填充，去掉外层白边；"
+            "没有黑边会自动回退到 SAM/GrabCut")
+        self.ck_outline.setChecked(True)
+        self.ck_outline.setEnabled(False)
+        mode_row.addWidget(self.ck_outline)
         mode_row.addStretch(1)
         v.addLayout(mode_row)
         right.addWidget(g_img)
@@ -3692,6 +4102,13 @@ class LaunchUI(QWidget):
             w.valueChanged.connect(self._apply_anim_params)
             # 手输数字时先不重建（重建会抢帧、把输入打断），输完再应用
             w.spin.editingFinished.connect(self._on_anim_edit_done)
+        self.btn_ai_motion = QPushButton("AI 生成参数…")
+        self.btn_ai_motion.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_ai_motion.setToolTip(
+            "用独立 ai_motion.json 调用大模型，生成九项动作参数、逐区域摆动"
+            "与 joy/sleepy 表情；逐项勾选后才写入 manifest")
+        self.btn_ai_motion.clicked.connect(self._open_ai_motion)
+        ag.addWidget(self.btn_ai_motion, 9, 0, 1, 2)
         v.addWidget(g_anim)
 
         tip = QLabel("改完直接关掉即可：动作参数立刻作用在画布上的桌宠，"
@@ -3720,6 +4137,26 @@ class LaunchUI(QWidget):
         if anim:
             self.sp_hair_speed.spin.setFocus(Qt.FocusReason.OtherFocusReason)
             self.sp_hair_speed.spin.selectAll()
+
+    def _open_ai_model(self):
+        """齿轮旁的 AI：模型接口（地址 / 模型 ID / 密钥），保存到本地配置。"""
+        from ai_motion_contract import AIGenError, load_config, save_config
+
+        try:
+            cfg = load_config()
+        except AIGenError as exc:
+            QMessageBox.warning(self, "模型接口", str(exc))
+            return
+        dlg = _AIModelDialog(self, cfg)
+        if dlg.exec() != QDialog.DialogCode.Accepted or dlg.result_cfg is None:
+            return
+        try:
+            save_config(dlg.result_cfg)
+        except OSError as exc:
+            QMessageBox.warning(self, "模型接口", f"保存失败：{exc}")
+            return
+        self._log("[AI] 模型接口已保存到本地 ai_motion.json"
+                  "（密钥文件不入库，权限 0600）")
 
     # ---------- 外部入口 ----------
     def _pick_image(self):
@@ -4979,6 +5416,153 @@ class LaunchUI(QWidget):
             "plat": val("sp_plat", 60.0) / 100.0,   # 界面 10~2000%，存成 0.1~20.0
         }
 
+    # ---------- AI 生成动作参数 / 表情 ----------
+    def _ai_motion_target(self):
+        """当前画布正在改的桌宠 (sku, stem, out_dir, item_index, item)。"""
+        st = self._cut or {}
+        out_dir = getattr(self, "_out_dir", None)
+        stem = str(st.get("stem") or "")
+        if not out_dir or not stem:
+            return None
+        man = Path(out_dir) / "manifest.json"
+        if not man.is_file():
+            return None
+        try:
+            data = read_manifest(man)
+        except Exception:                        # noqa: BLE001
+            return None
+        for i, it in enumerate(data.get("items") or []):
+            if isinstance(it, dict) and it.get("stem") == stem:
+                return (str(data.get("sku") or Path(out_dir).name), stem,
+                        Path(out_dir), i, it)
+        return None
+
+    def _run_motion(self, provider, request, config):
+        """后台线程跑一次 AI 请求；UI 线程只等结果，不冻结。"""
+        from PyQt6.QtCore import Qt as _Qt
+
+        from ai_motion_contract import AIGenError
+
+        loop = QEventLoop()
+        box: dict = {"proposal": None, "error": None}
+
+        def _ok(proposal):
+            box["proposal"] = proposal
+            if loop.isRunning():
+                loop.quit()
+
+        def _fail(msg):
+            box["error"] = msg
+            if loop.isRunning():
+                loop.quit()
+
+        worker = _AIMotionWorker(provider, request, config, self)
+        worker.ready.connect(_ok, type=_Qt.ConnectionType.QueuedConnection)
+        worker.failed.connect(_fail, type=_Qt.ConnectionType.QueuedConnection)
+        worker.start()
+        loop.exec()
+        worker.wait()
+        if box["error"]:
+            raise AIGenError(box["error"])
+        return box["proposal"]
+
+    def _open_ai_motion(self):
+        """动作参数页入口：调 ai_motion.json → 逐项勾选 → 同一 commit_changes 落盘。"""
+        target = self._ai_motion_target()
+        if target is None:
+            QMessageBox.information(
+                self, "AI 生成参数",
+                "先在桌宠空间点「修改」载入一只已生成的桌宠，再生成动作参数。")
+            return
+        sku, stem, out_dir, idx, item = target
+
+        from ai_motion_contract import AIGenError, load_config, validate_config
+        try:
+            cfg = load_config()
+        except AIGenError as exc:
+            QMessageBox.warning(self, "AI 生成参数", str(exc))
+            return
+        issues = validate_config(cfg)
+        if issues:
+            QMessageBox.information(
+                self, "AI 生成参数",
+                "AI 动作生成未配置：\n- " + "\n- ".join(issues) +
+                "\n\n把 desktop_pet/ai_motion.json.example 复制为 ai_motion.json "
+                "并填好 base_url / model；密钥只放环境变量，不写进文件。")
+            return
+
+        from ai_motion_adapter import (build_changeset, commit_selected,
+                                       request_from_item)
+        from ai_motion_provider import HttpMotionProvider
+
+        request = request_from_item(sku, stem, item)
+        try:
+            proposal = self._run_motion(HttpMotionProvider(), request, cfg)
+        except AIGenError as exc:
+            QMessageBox.warning(self, "AI 生成参数", f"{exc}\n\n参数未改动。")
+            return
+        if proposal is None:
+            QMessageBox.warning(self, "AI 生成参数",
+                                "AI 没有返回可用结果，参数未改动。")
+            return
+
+        dlg = _AIMotionDialog(self, item, proposal)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            changeset = build_changeset(sku=sku, stem=stem, item_index=idx,
+                                        item=item, proposal=proposal,
+                                        selected=dlg.selected)
+        except AIGenError as exc:
+            QMessageBox.warning(self, "AI 生成参数", str(exc))
+            return
+
+        import upgrade_core
+        info = next((s for s in upgrade_core.scan_skus(out_dir.parent)
+                     if s.name == out_dir.name), None)
+        if info is None:
+            info = upgrade_core.SkuInfo(
+                name=out_dir.name, dir=out_dir,
+                manifest_path=out_dir / upgrade_core.MANIFEST_NAME,
+                manifest={}, schema_version=2, sku_field=out_dir.name)
+        result = commit_selected(info, changeset)
+        if not result.report.ok:
+            QMessageBox.warning(self, "AI 生成参数",
+                                "写入失败（已回滚）：\n" + result.report.text)
+            return
+        self._apply_ai_motion_result(proposal, dlg.selected, result)
+        QMessageBox.information(
+            self, "AI 生成参数",
+            "已写入：\n" + "\n".join(result.report.lines))
+
+    def _apply_ai_motion_result(self, proposal, selected, result):
+        """落盘成功后同步画布：滑块、逐区域摆动与渲染缓存。"""
+        sel = set(selected or ())
+        anim = {k: v for k, v in proposal.anim.items() if f"anim/{k}" in sel}
+        if anim:
+            self._apply_edit_anim({**self._anim_params(), **anim})
+        for kind in ("hair", "cloth"):
+            items = (self._cut or {}).get(kind) or []
+            changed = False
+            for i in range(len(items)):
+                if f"sway/{kind}/{i}" not in sel:
+                    continue
+                adv = proposal.sway.get(kind) or []
+                if i >= len(adv):
+                    continue
+                items[i]["amp"] = adv[i]["amp"]
+                items[i]["dir"] = adv[i]["dir"]
+                items[i]["bias"] = adv[i]["bias"]
+                changed = True
+            if changed:
+                self._sync_sway_table()
+                self._queue_sway_save(kind)
+        self._pet_key = None
+        self._rebuild_anim(force=True)
+        self._log(f"[AI] 动作参数已写入 manifest 与 {len(result.written)} 个覆盖层："
+                  + "、".join(sorted(sel)))
+
     def _pet_engine(self, rgba):
         """按当前眼眶、发缕与时间轴建一个可逐帧渲染的桌宠（结果缓存）。"""
         st = self._cut
@@ -5065,17 +5649,10 @@ class LaunchUI(QWidget):
         dlg.exec()
 
     def _save_source(self):
-        """剪切结果落盘：白底裁切图 + 掩膜，素材生成和选做步骤都读这两个文件。"""
+        """剪切结果落盘：白底裁切图 + 掩膜；手动与 AI 切割共用同一函数。"""
         st = self._cut
-        x0, y0, x1, y1 = st["box"]
-        crop = st["rgb"][y0:y1, x0:x1]
-        m = st["mask"][y0:y1, x0:x1]
-        white = np.full_like(crop, 255)
-        white[m > 0] = crop[m > 0]
-        st["src_png"] = st["source_dir"] / f"{st['stem']}.png"
-        st["src_mask"] = st["source_dir"] / f"{st['stem']}_mask.png"
-        Image.fromarray(white).save(st["src_png"])
-        Image.fromarray((m.astype(np.uint8) * 255)).save(st["src_mask"])
+        st["src_png"], st["src_mask"] = launch.save_cut_source(
+            st["rgb"], st["mask"], st["box"], st["source_dir"], st["stem"])
         print(f"    ✓ {st['src_png'].name}  {st['src_mask'].name}")
 
     # ---------- 任务调度 ----------
@@ -5110,7 +5687,8 @@ class LaunchUI(QWidget):
         cut = self._cut is not None
         self.btn_start.setEnabled(not busy)
         self.rb_cut_manual.setEnabled(not busy)
-        self.rb_cut_ai.setEnabled(not busy and getattr(self, "_local_ai_ready", False))
+        self.rb_cut_ai.setEnabled(not busy)
+        self.ck_outline.setEnabled(not busy and self.rb_cut_ai.isChecked())
         for b in (self.btn_eyes, self.btn_sway):
             b.setEnabled(not busy and cut)
         self.btn_table.setEnabled(not busy and cut)
@@ -5134,62 +5712,36 @@ class LaunchUI(QWidget):
                 800, lambda: None if self._progress_running else p.setVisible(False))
 
     def _start(self):
-        """第一步（必做）：手动框取或本地 AI 抠图，结果都落到同一份剪切结果。"""
+        """第一步（必做）：手动框取或 AI 识别框取，结果都落到同一份剪切结果。"""
         if not self._image_path:
             self._log("[提示] 请先选择图片")
             return
         self.log.clear()
-        self._run_task(self._ai_cut_flow if self.rb_cut_ai.isChecked()
-                       else self._cut_flow)
+        if self.rb_cut_ai.isChecked():
+            # 框由人定，AI 只做框内切割（SAM/GrabCut），不再让视觉模型猜框
+            self._run_task(lambda: self._cut_flow(auto_seg=True))
+        else:
+            self._run_task(self._cut_flow)
 
     def _sync_cut_mode(self, *_):
         """切换抠图方式：只改主按钮文案，不动后续标注流程。"""
         if not hasattr(self, "btn_start"):
             return
+        if hasattr(self, "ck_outline"):
+            self.ck_outline.setEnabled(self.rb_cut_ai.isChecked())
         if self.rb_cut_ai.isChecked():
-            self.btn_start.setText("开始处理（本地 AI 抠图，不上传）")
+            self.btn_start.setText("开始处理（手动框选 + AI 切割）")
             self.btn_start.setToolTip(
-                "整图本地分割，结果仍需人工确认；失败自动回手动框选")
+                "先手动框住主体，再由 SAM/GrabCut 自动切割；"
+                "可勾选「贴内层黑边」去掉外层白边")
         else:
             self.btn_start.setText("开始处理（框取手办并抠图）")
             self.btn_start.setToolTip("框取手办并抠图")
 
-    def _run_matting(self, provider, request, config):
-        """后台线程跑一次本地推理；UI 线程只等结果，进度条继续动画。"""
-        from PyQt6.QtCore import Qt as _Qt
-
-        from ai_generate_contract import AIGenError
-        from ai_generate_worker import MattingWorker
-
-        loop = QEventLoop()
-        box: dict = {"cands": None, "error": None}
-
-        def _ok(cands):
-            box["cands"] = cands
-            if loop.isRunning():
-                loop.quit()
-
-        def _fail(msg):
-            box["error"] = msg
-            if loop.isRunning():
-                loop.quit()
-
-        worker = MattingWorker(provider, request, config, self)
-        # 队列连接：信号只在 UI 事件循环里处理，不会丢在 exec() 之前
-        worker.prepared.connect(_ok, type=_Qt.ConnectionType.QueuedConnection)
-        worker.failed.connect(_fail, type=_Qt.ConnectionType.QueuedConnection)
-        worker.start()
-        loop.exec()
-        worker.wait()
-        if box["error"]:
-            raise AIGenError(box["error"])
-        return box["cands"] or []
-
     def _ai_cut_flow(self):
-        """本地 AI 抠图：整图 → soft alpha → 同一份 self._cut，后续完全共用。"""
-        from ai_generate_contract import (AIGenError, AIGenRequest,
-                                          load_config)
-        from ai_generate_provider import LocalMattingProvider
+        """AI 识别抠图：视觉模型给前景框，像素级掩膜仍由本地精修。"""
+        from ai_cut_box import detect_box, outline_mask, to_pixel_box
+        from ai_motion_contract import AIGenError, load_config, validate_config
 
         path = self._image_path
         sku = launch.safe_stem(self.ed_sku.text().strip() or "custom")
@@ -5202,6 +5754,11 @@ class LaunchUI(QWidget):
         self._out_dir = out_dir
         self.btn_build.setToolTip("保存素材并启动桌宠（PNG / WebP / manifest）")
 
+        def fallback(msg: str):
+            self._log(f"[AI] {msg}；已改手动框选")
+            self.rb_cut_manual.setChecked(True)
+            return self._cut_flow()
+
         self._step("第 1 步 · 读图")
         print(f"[AI 1/3] 读图 {Path(path).name}")
         im = Image.open(path)
@@ -5210,37 +5767,64 @@ class LaunchUI(QWidget):
         has_alpha = int(rgba[..., 3].min()) < 250
         self.canvas.set_image(rgb)
 
-        cfg = load_config()
-        if not cfg.enabled or cfg.transport != "local":
-            self._log("[AI] 未启用本地模式：ai_generate.json 需 enabled=true、"
-                      "transport=local；已回手动框选")
-            self.rb_cut_manual.setChecked(True)
-            return
-
         if has_alpha:
             print("[AI 2/3] 原图自带 alpha，直接用透明通道")
             alpha = rgba[..., 3].astype(np.float32) / 255.0
+            mask = (alpha > 0.5).astype(np.uint8)
         else:
-            self._step("第 2 步 · 本地 AI 抠图…",
-                       "首次加载模型可能较慢；图片不上传")
-            print("[AI 2/3] 本地分割（不上传）")
-            request = AIGenRequest(sku=sku, stem=stem,
-                                   image_bytes=Path(path).read_bytes(),
-                                   width=rgb.shape[1], height=rgb.shape[0])
+            cfg = load_config()
+            issues = validate_config(cfg)
+            if issues:
+                return fallback("；".join(issues))
+            dlg = _AICutPromptDialog(self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                raise Cancelled()
+            instruction = dlg.subject_text or ""
+            outline = bool(dlg.outline)
+            self._step("第 2 步 · AI 识别主体…",
+                       "贴内层黑边" if outline
+                       else "图片和描述会发送到模型接口；只取前景框，抠图仍在本机")
+            print("[AI 2/3] 视觉模型识别前景框（图片会上传）")
             try:
-                cands = self._run_matting(
-                    LocalMattingProvider(cfg.model or None), request, cfg)
+                nbox = detect_box(cfg, Path(path).read_bytes(),
+                                  rgb.shape[1], rgb.shape[0],
+                                  instruction=instruction)
+                box = to_pixel_box(nbox, rgb.shape[1], rgb.shape[0])
             except AIGenError as exc:
-                self._log(f"[AI] {exc}；已回手动框选")
-                self.rb_cut_manual.setChecked(True)
-                return
-            alpha = np.maximum.reduce([c.alpha for c in cands])
+                return fallback(str(exc))
+            print(f"    AI 框 {box}")
+            if outline:
+                self._step("沿黑色描边填充…", "正在贴合主体内层黑边，去掉外层白边")
+                try:
+                    mask = outline_mask(rgb, box)
+                    print(f"    贴黑边掩膜覆盖率 {mask.mean() * 100:.1f}%")
+                except AIGenError as exc:
+                    self._log(f"[AI] {exc}；改用自动分割")
+                    mask = launch.estimate_mask(
+                        rgb, rgba, has_alpha, box, None, None,
+                        self.cb_engine.currentText(),
+                        self.cb_device.currentText(), {})
+            else:
+                self._step("计算掩膜…", "正在按 AI 框估计前景掩膜，请稍候")
+                mask = launch.estimate_mask(
+                    rgb, rgba, has_alpha, box, None, None,
+                    self.cb_engine.currentText(), self.cb_device.currentText(), {})
+            if mask.mean() < 0.005:
+                # SAM 偶尔会给一个“分数最高但极小”的局部（如 0.2%）。
+                # 这种结果直接保存就是一张几乎全空的图，改用整图重估。
+                print(f"    掩膜只有 {mask.mean() * 100:.1f}%，"
+                      "判定为异常，改用整图 GrabCut/白底阈值")
+                self._step("重新估计掩膜…", "SAM 结果过小，改用整图分割")
+                mask = launch.estimate_mask(
+                    rgb, rgba, has_alpha,
+                    (0, 0, rgb.shape[1], rgb.shape[0]), None, None,
+                    "grabcut", self.cb_device.currentText(), {})
+                if mask.mean() < 0.005:
+                    return fallback("SAM 与 GrabCut 都没有得到有效掩膜")
+            print(f"    掩膜覆盖率 {mask.mean() * 100:.1f}%")
 
-        mask = (alpha > 0.5).astype(np.uint8)
         if mask.mean() <= 0:
-            self._log("[AI] 结果全透明；已回手动框选")
-            self.rb_cut_manual.setChecked(True)
-            return
+            return fallback("结果全透明")
 
         h, w = rgb.shape[:2]
         self._cut = {"path": path, "sku": sku, "stem": stem,
@@ -5264,8 +5848,12 @@ class LaunchUI(QWidget):
             raise Cancelled()
         return value
 
-    def _cut_flow(self):
-        """必做步骤：读图 → 框取 →（可跳过补点）→ 抠图，完成后立刻显示剪切结果。"""
+    def _cut_flow(self, auto_seg: bool = False):
+        """必做步骤：读图 → 框取 →（可跳过补点）→ 抠图。
+
+        ``auto_seg=True``（界面上的「手动框选 + AI 切割」）只跳过补点：
+        框仍由人画，掩膜交给 SAM/GrabCut。
+        """
         path = self._image_path
         sku = launch.safe_stem(self.ed_sku.text().strip() or "custom")
         stem = launch.safe_stem(self.ed_name.text().strip()
@@ -5287,12 +5875,22 @@ class LaunchUI(QWidget):
         print(f"    尺寸 {rgb.shape[1]}×{rgb.shape[0]}"
               + ("  含 alpha，直接用透明通道" if has_alpha else ""))
 
+        target = ""
+        if auto_seg and not has_alpha:
+            dlg = _AICutPromptDialog(
+                self, initial_outline=self.ck_outline.isChecked())
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                raise Cancelled()
+            target = dlg.subject_text
+            self.ck_outline.setChecked(dlg.outline)
+
         # ---- 框取 → 确认框大小 → 只保留框内画面 ----
         while True:
             # 回退重框时也要回到整图，不能在裁切图上再画框
             self.canvas.set_image(rgb)
             self._step("第 1 步 · 框取手办",
-                       "拖拽或左键点两个对角圈住手办；回车确认"
+                       (f"请框住：{target}；" if target else "")
+                       + "拖拽或左键点两个对角圈住手办；回车确认"
                        "（r 重框 / u 撤销 / f 整图 / ESC 取消）")
             print("[2/3] 框取手办")
             box = self._require(self._run_phase(
@@ -5318,6 +5916,59 @@ class LaunchUI(QWidget):
             if act is None:
                 raise Cancelled()
             # back → 重新框取
+
+        if auto_seg:
+            # 框由人定，AI 只做框内切割：把原始框交给 SAM/GrabCut，
+            # 再把掩膜裁回框内（不能先裁图再传整图框，否则 SAM 拿不到框提示）
+            from ai_cut_box import outline_mask
+            from ai_motion_contract import AIGenError
+
+            self._step("AI 切割…", "正在按手动框估计前景掩膜，请稍候")
+            cache: dict = {}
+            if self.ck_outline.isChecked():
+                try:
+                    mask_full = outline_mask(rgb, box)
+                    print(f"    贴黑边掩膜覆盖率 {mask_full.mean() * 100:.1f}%")
+                except AIGenError as exc:
+                    self._log(f"[AI] {exc}；改用自动分割")
+                    mask_full = launch.estimate_mask(
+                        rgb, rgba, has_alpha, box, None, None,
+                        self.cb_engine.currentText(),
+                        self.cb_device.currentText(), cache)
+            else:
+                mask_full = launch.estimate_mask(
+                    rgb, rgba, has_alpha, box, None, None,
+                    self.cb_engine.currentText(),
+                    self.cb_device.currentText(), cache)
+            if mask_full.mean() < 0.005:
+                print(f"    掩膜只有 {mask_full.mean() * 100:.1f}%，"
+                      "判定为异常，改用整图重估")
+                mask_full = launch.estimate_mask(
+                    rgb, rgba, has_alpha,
+                    (0, 0, rgb.shape[1], rgb.shape[0]), None, None,
+                    "grabcut", self.cb_device.currentText(), cache)
+                if mask_full.mean() < 0.005:
+                    self._log("[AI] 没有得到有效掩膜；请换手动框选或补点")
+                    raise Cancelled()
+            mask = np.ascontiguousarray(mask_full[y0:y1, x0:x1])
+            h, w = crop_rgb.shape[:2]
+            self._cut = {"path": path, "sku": sku, "stem": stem,
+                         "source_dir": source_dir, "out_dir": out_dir,
+                         "rgb": crop_rgb, "rgba": crop_rgba,
+                         "has_alpha": has_alpha, "box": (0, 0, w, h),
+                         "mask": mask, "pts": [], "cache": cache,
+                         "sockets": [], "levels": [], "hair": [], "cloth": []}
+            self._hl_mask = None
+            self._sync_sway_table()
+            self._save_source()
+            self._show_cutout(show_mask=True, show_board=True)
+            title = f"AI 切割结果预览 · {target}" if target else "AI 切割结果预览"
+            act = self._run_preview(self._frames_cut(), title,
+                                    back=None, ok="保存 (s)", sharpen=True)
+            if act != "ok":
+                raise Cancelled()
+            self._save_source()
+            return
 
         # 之后所有步骤都只看框内画面（补点/眼眶/发缕坐标也都在这个裁切里）
         rgb, rgba = crop_rgb, crop_rgba

@@ -4,10 +4,13 @@ __pycache__/
 .venv/
 venv/
 
-# 模型权重
+# 模型权重（用户自备，不回仓）
 *.pt
 *.pth
 *.ckpt
+*.safetensors
+*.onnx
+desktop_pet/models/
 
 # 生成产物（透明素材包）
 desktop_pet/assets/
@@ -27,4 +30,5 @@ desktop_pet/agent.json
 
 # AI 生成入口：本地配置与候选缓存不入库（模板仍提交）
 desktop_pet/ai_generate.json
+desktop_pet/ai_motion.json
 desktop_pet/.ai_cache/

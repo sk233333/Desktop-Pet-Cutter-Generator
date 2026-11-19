@@ -823,6 +823,23 @@ def save_blink_json(source_dir: Path, stem: str, plan: dict) -> Path:
     return p
 
 
+def save_cut_source(rgb, mask, box, source_dir, stem):
+    """剪切源图落盘：白底裁切图 + 掩膜，只写这两个源文件。
+
+    手动与 AI 切割共用；不写 manifest / 覆盖层 / 最终透明素材。
+    """
+    x0, y0, x1, y1 = [int(v) for v in box]
+    crop = rgb[y0:y1, x0:x1]
+    m = mask[y0:y1, x0:x1]
+    white = np.full_like(crop, 255)
+    white[m > 0] = crop[m > 0]
+    src_png = Path(source_dir) / f"{stem}.png"
+    src_mask = Path(source_dir) / f"{stem}_mask.png"
+    Image.fromarray(white).save(src_png)
+    Image.fromarray((m.astype(np.uint8) * 255)).save(src_mask)
+    return src_png, src_mask
+
+
 def update_manifest(out_dir: Path, sku: str, item: dict) -> Path:
     path = out_dir / "manifest.json"
     items = []
@@ -1041,13 +1058,8 @@ def main():
     print("[6/6] 生成透明素材")
 
     # ---------- 裁切 + 白底合成 ----------
-    crop = rgb[y0:y1, x0:x1]
-    white = np.full_like(crop, 255)
-    white[mask[y0:y1, x0:x1] > 0] = crop[mask[y0:y1, x0:x1] > 0]
-    src_png = source_dir / f"{stem}.png"
-    src_mask = source_dir / f"{stem}_mask.png"
-    Image.fromarray(white).save(src_png)
-    Image.fromarray(mask[y0:y1, x0:x1] * 255).save(src_mask)
+    src_png, src_mask = save_cut_source(
+        rgb, mask, (x0, y0, x1, y1), source_dir, stem)
 
     eyes_path = None
     if eyes_manual:

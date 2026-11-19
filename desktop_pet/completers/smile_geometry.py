@@ -155,8 +155,10 @@ def _color(eyes: list[dict]) -> tuple[int, int, int, int]:
 
 
 def _draw(canvas: np.ndarray, eyes: list[dict], width: int, height: int,
-          preset: str, with_arc: bool = True) -> np.ndarray:
-    params = _params(preset)
+          preset: str, with_arc: bool = True,
+          params: dict | None = None) -> np.ndarray:
+    # params 用于 AI 动作生成：直接吃已夹取的参数，不再按预设查表
+    params = params if params is not None else _params(preset)
     geom = _geometry(eyes, width, height, params, with_arc=with_arc)
     color = _color(eyes)
     thick = 2 if max(width, height) >= 256 else 1
@@ -334,7 +336,7 @@ def verify(changeset: ChangeSet, sku_dir=None, manifest_after=None) -> Report:
             ok = False
             lines.append(f"ExprBank.STATES 被改动：{STATES}")
         else:
-            lines.append("ExprBank.STATES 新 golden 未变（七态）")
+            lines.append("ExprBank.STATES 未变（joy/sleepy 不注册状态）")
     except Exception as exc:                 # noqa: BLE001
         lines.append(f"STATES 检查跳过：{exc}")
     return Report(ok, lines)
