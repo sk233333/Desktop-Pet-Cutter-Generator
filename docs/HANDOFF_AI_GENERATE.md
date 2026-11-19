@@ -3,7 +3,7 @@
 > 状态：AI-G0~G9 已本地实现并验证。**origin/main 冻结在 `7531ff3`**；
 > 本地 commit 已拆分，在 G9 全绿前禁止 `git push`。
 > 基线：本地 209 passed；干净 venv 203 passed, 1 skipped；工作树仅 `?? docs/images/`。
-> 实现后：本地 231 passed；干净 venv 225 passed, 1 skipped（skip 仍只有 GUI 文件）。
+> 实现后：本地 234 passed；干净 venv 228 passed, 1 skipped（skip 仍只有 GUI 文件）。
 
 ## 1. 目标与红线
 
@@ -45,6 +45,7 @@ warnings / 是否上传），不升 schema；预览 PNG 也是 `ChangeSet.files`
 
 ```
 enabled: false
+transport: remote            # remote = 远端服务；local = 本地分割（零网络）
 provider: <placeholder>
 base_url: <placeholder>
 model: <placeholder>
@@ -56,6 +57,8 @@ cache_dir: <user-local-cache>
 thinking: false
 ```
 
+- `transport=local` 时不要求 `upload_consent` / `key_env` / `base_url`；
+  本地推理不上传、不读 key，模型名可空（默认 `isnet-general-use`）。
 - `.gitignore` 增 `desktop_pet/ai_generate.json` 与 AI 缓存目录。
 - 两个开关独立：`chat.enabled` 管聊天；`ai_generate.enabled` 管配置期候选。
 
@@ -155,21 +158,22 @@ thinking: false
 
 | 文件 | 职责 |
 |---|---|
-| `desktop_pet/ai_generate.json.example` | 配置模板：`enabled=false`、占位 host/模型、`upload_consent=false`、无 key |
-| `desktop_pet/ai_generate_contract.py` | `AIGenConfig / AIGenRequest / AIGenCandidate / AIGenError`；`load_config`、`validate_config`、`propose_candidates`（配置闸门 + 候选过滤） |
-| `desktop_pet/ai_generate_provider.py` | `FakeProvider`（CI/POC）+ `HttpAIProvider`（urllib，无重试）；缺 key / 未授权上传 / 超时 / 429 / 5xx / 非 JSON 均抛 `AIGenError` |
+| `desktop_pet/ai_generate.json.example` | 配置模板：`enabled=false`、`transport=remote`、占位 host/模型、`upload_consent=false`、无 key |
+| `desktop_pet/ai_generate_contract.py` | `AIGenConfig / AIGenRequest / AIGenCandidate / AIGenError`；`load_config`、`validate_config`、`propose_candidates`（按 transport 分支校验） |
+| `desktop_pet/ai_generate_provider.py` | `FakeProvider`（CI/POC）+ `HttpAIProvider`（远端，urllib）+ `LocalMattingProvider`（本地 rembg，惰性导入） |
+| `desktop_pet/ai_generate_worker.py` | 本地推理 QThread；UI 线程只等结果，不冻结 |
 | `desktop_pet/ai_generate_adapter.py` | soft alpha → base RGBA + 独立预览 PNG + `items[].ai_provenance`；`commit_selected()` 委托 `upgrade_core.commit_changes()` |
-| `desktop_pet/new_sku_wizard.py` | 新建 SKU：手动切割（默认）/ AI 生成；显式上传确认；候选默认不选；整体否决；失败回手动 |
-| `desktop_pet/ui_app.py` | 新增「新建 SKU…」最小入口，仅懒加载向导 |
+| `desktop_pet/new_sku_wizard.py` | 新建 SKU：手动切割（默认）/ AI 生成；按 transport 选 provider；候选默认不选；整体否决；失败回手动 |
+| `desktop_pet/ui_app.py` | 图片组新增「抠图方式：手动框选（默认）/ 本地 AI 抠图」；AI 只替换框取+抠图，之后同一份 `self._cut`；新增「新建 SKU…」入口 |
 | `desktop_pet/upgrade_core.py` | 仅加「manifest 不存在但内存有 v2 骨架」的 fallback + 失败时清理本次新建空目录；写盘路径仍唯一 |
 | `tests/test_ai_generate.py` / `tests/test_ai_generate_adapter.py` | `test_aig_*`，fake provider / 注入 opener，真实 API 不进 CI |
 
 ### 验收事实
 
-- `pytest -q`：**231 passed**（209 + 22 个 `test_aig_*` 节点）。
-- 干净 venv 五包 + `MPLBACKEND=Agg`：**225 passed, 1 skipped**；`import PyQt6`
+- `pytest -q`：**234 passed**（209 + 25 个 `test_aig_*` 节点）。
+- 干净 venv 五包 + `MPLBACKEND=Agg`：**228 passed, 1 skipped**；`import PyQt6`
   仍 `ModuleNotFoundError`。
-- `--collect-only -q | grep test_aig_` 可见 22 个节点。
+- `--collect-only -q | grep test_aig_` 可见 25 个节点。
 - fake provider 全链路：候选 → 点选 → ChangeSet → `validate_manifest` →
   临时 SKU 读回 `ai_provenance` / base RGBA / 预览 PNG。
 - 保护文件自 `7531ff3` 零 diff；tag `v0.1` 仍 `b03cdb7`；工作树仅

@@ -6,14 +6,20 @@
 
 ### 行为变更
 
+- 主页「图片」组新增「抠图方式：手动框选（默认）/ 本地 AI 抠图」；AI 只
+  替换「框取 + 抠图」，落盘仍是同一份 `self._cut`，后续眼睛 / 摆动 / 生成
+  完全共用。
 - 新建 SKU 增加「手动切割（默认）/ AI 生成」二选一入口（`new_sku_wizard`）。
   「AI 一键」收窄为**一次请求出全部候选 + 逐项人工确认**，不等于自动写盘。
 - AI 只出 soft alpha / 区域框 / 置信度 / warnings / 出处类别；不做表情贴片、
   不注册 STATES、不端到端自动成品。
 - 默认零网络：`ai_generate.json` 不存在或 `enabled=false` 时不发请求；
-  上传默认关，显式勾选后才发送原图字节（不发路径 / key / 日志）。
-- 失败（缺 key / 超时 / 429 / 5xx / 非 JSON / 候选全无效 / 写盘失败）一律
-  整体回手动，不留半份 SKU，不产生临时目录。
+  远端模式上传默认关，显式勾选后才发送原图字节（不发路径 / key / 日志）。
+- `transport=local` 用 `LocalMattingProvider`（rembg，惰性导入）在进程内推理，
+  不读 key、不上传；推理在 QThread，UI 不冻结。rembg 为可选本地依赖，
+  不进 CI、不进仓库；模型文件由 rembg 放到 `~/.u2net`。
+- 失败（缺 key / 超时 / 429 / 5xx / 非 JSON / 依赖缺失 / 候选全无效 /
+  写盘失败）一律整体回手动，不留半份 SKU，不产生临时目录。
 
 ### 数据格式
 
@@ -27,9 +33,9 @@
 
 ### 测试
 
-- 本地 `pytest -q`：**231 passed**；干净 venv 五包：**225 passed, 1 skipped**
+- 本地 `pytest -q`：**234 passed**；干净 venv 五包：**228 passed, 1 skipped**
   （唯一 skip 仍是 GUI 文件，未新增 GUI 测试）。
-- `test_aig_*` 22 个节点，fake provider / 注入 opener；真实 API 不进 CI。
+- `test_aig_*` 25 个节点，fake provider / 注入 opener；真实 API 不进 CI。
 - 保护文件自 `7531ff3` 零 diff；tag `v0.1` 不移动；无权重、无新依赖。
 
 ## B-2 smile 独立状态（R2，已接线）
