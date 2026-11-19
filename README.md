@@ -255,18 +255,19 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 
 编辑器右侧**「能力补全向导…」**打开六步向导：选 SKU → 体检 → 挑补全器 →
 并排预览 → 落盘 → 报告。它补的是「已有功能缺的数据」，不是软件版本升级。
-首期只注册三个纯本地补全器：
+当前注册四个纯本地补全器：
 
 | id | 作用 | 落盘 |
 | --- | --- | --- |
 | `mask.from_ellipse` | 用 `eyes` 椭圆生成 socket（已有 mask 跳过；必须逐只点清真眼） | 覆盖层 PNG + `parts[].mask` |
 | `mask.domain_hint` | 只读候选框：把「哪只可能是真眼」摆给人看 | 不写盘 |
 | `mouth.open` | 补 `mouth_dir` 空槽（闭 / 微笑 / 小 o） | 独立覆盖层 PNG + `mouth_dir` |
+| `expr.smile_geometry` | 配置期补微笑几何（眼轻眯 / 嘴角弧 / 腮红 alpha）；只产数据，不改 `STATES` | 独立覆盖层 PNG + `smile_geometry`（`runtime_consumer: null`） |
 
 - 逐 SKU、逐候选人工确认；整体否决 = 零路径。批量只出报告，**不批量 commit**。
 - 落盘统一过 `validate_manifest`；v1 manifest 走 `v1_to_v2` 同一迁移入口。
-- 原图 `base` 不动，产物一律独立覆盖层；向导首期不含 `smile` / `calib.*` / L3；
-  AI 对话见下一节（默认关闭）。
+- 原图 `base` 不动，产物一律独立覆盖层；向导不含 `smile` 独立状态 / `calib.*` /
+  L3（B-1 只补几何数据槽，未接线）；AI 对话见下一节（默认关闭）。
 - `ExprBank` 仍是六态、`smile → half` 别名不变；`mouth_dir` 在桌面运行时按静态
   常驻合成（素材分辨率一次，无 `mouth_dir` 不合成）；说话驱动排 v0.1.1。
   编辑器 `PetPreview` 首期不同步。测试以 `pytest -q` 当前结果为准。

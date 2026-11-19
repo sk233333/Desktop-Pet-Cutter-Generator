@@ -2,6 +2,33 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## B-1 配置期微笑几何数据槽（只产数据，未接线）
+
+### 行为变更
+
+- 向导新增第四个补全器 `expr.smile_geometry`：零 AI、纯几何，输出「眼睛轻眯 /
+  嘴角弧 / 腮红 alpha」三组参数与一张独立覆盖层 PNG。
+- 只产配置期数据，**不注册 `smile` 状态**：不改 `ExprBank.STATES`、不改
+  `smile → half` 别名表、不进 `derive_allowed()` / 向导 `allowed` 提案；
+  词表输出与之前逐项相同。
+- 不复刻 `mouth.open` 的三档微笑嘴贴片；与已有 `mouth_dir` 不互相写入。
+
+### 数据格式
+
+- 新增可选数据槽 `items[].smile_geometry = {schema, preset, overlay,
+  runtime_consumer, params, eyes[], mouth_arc, blush[]}`；`overlay` 指向
+  `<stem>_smile.png`（独立 RGBA 覆盖层）。
+- `runtime_consumer: null` 表示当前无运行时读方；`preset` 只允许
+  `light / medium / strong`，几何数值按画布尺寸裁剪。
+- `manifest_io.py` / `manifest.schema.json` 未改：沿用 `mouth_dir` 的先例，
+  可选字段不升 schema，`validate_manifest` 原样放行。
+
+### 测试与状态
+
+- Qt-free 断言在 `tests/test_smile_geometry.py`；`pytest -q` 以实际输出为准。
+- 三档状态：**已实现** = 几何生成器 + 并排预览 + 人工点选 + 独立覆盖层落盘；
+  **已接线** = 无（`runtime_consumer: null`）；**待拍板** = `smile` 独立状态（B-2）。
+
 ## 嘴型 overlay 运行时（T-M3 ~ T-M5）
 
 ### 行为变更
@@ -64,10 +91,12 @@
 
 - **新增六步「能力补全向导」**（`upgrade_wizard.py`，主界面唯一入口）：
   选 SKU → 体检 → 挑补全器 → 并排预览 → 落盘 → 报告。纯本地、不联网。
-- **三个补全器**：`mask.from_ellipse`（椭圆 socket，已有 mask 跳过、逐只点选）、
-  `mask.domain_hint`（只读候选框）、`mouth.open`（独立覆盖层 PNG）。
-- **体检面板**：把 Issue #1/#2、25° 未标定、`bias` 未暴露、`smile` 缺失
-  列成可见清单；`smile` 标 `v0.1.1` 且不可勾选，不自动关 Issue。
+- **首期三个补全器**：`mask.from_ellipse`（椭圆 socket，已有 mask 跳过、逐只点选）、
+  `mask.domain_hint`（只读候选框）、`mouth.open`（独立覆盖层 PNG）；
+  第四个 `expr.smile_geometry` 见上方 B-1 节。
+- **体检面板**：把 Issue #1/#2、25° 未标定、`smile` 独立状态列成可见清单；
+  `smile` 标 `v0.1.1` 且不可勾选，不自动关 Issue。`bias` 行已在 C-5 改为
+  「已暴露」。
 - **落盘闸门**：逐候选 `commit` 只返回 `ChangeSet`，由 `upgrade_core` 统一
   过 `validate_manifest`、原子写、失败整体回滚；路径锁死在当前 SKU 目录。
 - **`allowed` 只产提案**：运行时词表由 `derive_allowed()` 从 `expr_state.STATES` +
@@ -85,10 +114,11 @@
 ### 测试与状态
 
 - 向导交付时为 **108 passed**（pre-wizard 基线 93，历史值；以 `pytest -q` 为准）。
-- 三档状态：**已实现** = 六步向导 + 三个补全器；**已接线** = `mouth_dir` 静态常驻；
+- 三档状态：**已实现** = 六步向导 + 首期三个补全器；**已接线** = `mouth_dir` 静态常驻；
   **待拍板** = `smile` 独立状态、配置期生成式候选（AI 范围页）。
   `derive_allowed()` 已在 A1 对话里落地，向导提案不写词表。
-- Step 1 的「smile 缺失」只是体检项，标 `v0.1.1`，**不代表本轮能补**。
+- Step 1 的「smile 独立状态」只是体检项，标 `v0.1.1`，**不代表状态表能动**；
+  B-1 补的是几何数据槽（见上节），不是 `smile` 状态。
 
 ## 摆动收敛（逐区域幅度 / 方向 / bias）
 
@@ -127,7 +157,7 @@
 | --- | --- |
 | `dir` 是往返轴，不是单向偏置 | 由正弦驱动；要单向飘需另加 bias，已保留字段 |
 | 方向只有 8 档，无逐区域风力 / 相位 | 未实现；当前共用 `wind_speed / amp / stiffness / damping` |
-| `bias` 已支持但 UI 不暴露 | 先落数据与渲染，避免再做一轮 UI 改动 |
+| `bias` 已支持（C-5 已暴露到「摆动」页行内控件） | 旧句「UI 不暴露」已作废；上下限与 `SWAY_RANGES` 同源 |
 | 结构性修改（增删区域 / 改眼眶 / 时间轴）仍整体重建引擎 | 纯调幅度 / 方向已走 `apply_params` 就地更新 |
 | `swing_all` 单帧 512² 5.8ms / 1024² 18.1ms | 口径：同机同图、3 块区域、7 次中位数、T-S1 之后；内核未改，拖动流畅来自 `apply_params` 就地更新 + 80ms 预览合并，不是内核提速。大图预览仍有轻微掉帧风险，未做降采样 |
 | 运行时逐区域参数与右键「整体漂移方向」互不读取 | 两个概念，文案已区分 |
