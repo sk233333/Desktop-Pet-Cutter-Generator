@@ -262,15 +262,15 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 | `mask.from_ellipse` | 用 `eyes` 椭圆生成 socket（已有 mask 跳过；必须逐只点清真眼） | 覆盖层 PNG + `parts[].mask` |
 | `mask.domain_hint` | 只读候选框：把「哪只可能是真眼」摆给人看 | 不写盘 |
 | `mouth.open` | 补 `mouth_dir` 空槽（闭 / 微笑 / 小 o） | 独立覆盖层 PNG + `mouth_dir` |
-| `expr.smile_geometry` | 配置期补微笑几何（眼轻眯 / 嘴角弧 / 腮红 alpha）；只产数据，不改 `STATES` | 独立覆盖层 PNG + `smile_geometry`（`runtime_consumer: null`） |
+| `expr.smile_geometry` | 配置期补微笑几何（眼轻眯 / 嘴角弧 / 腮红 alpha）；只产数据，不改 `STATES` | 独立覆盖层 PNG + `smile_geometry`（`runtime_consumer: "pet_window"`） |
 
 - 逐 SKU、逐候选人工确认；整体否决 = 零路径。批量只出报告，**不批量 commit**。
 - 落盘统一过 `validate_manifest`；v1 manifest 走 `v1_to_v2` 同一迁移入口。
-- 原图 `base` 不动，产物一律独立覆盖层；向导不含 `smile` 独立状态 / `calib.*` /
-  L3（B-1 只补几何数据槽，未接线）；AI 对话见下一节（默认关闭）。
-- `ExprBank` 仍是六态、`smile → half` 别名不变；`mouth_dir` 在桌面运行时按静态
-  常驻合成（素材分辨率一次，无 `mouth_dir` 不合成）；说话驱动排 v0.1.1。
-  编辑器 `PetPreview` 首期不同步。测试以 `pytest -q` 当前结果为准。
+- 原图 `base` 不动，产物一律独立覆盖层；向导提案仍不含 `smile`（proposal-only），
+  运行时词表见下一节；`calib.*` / L3 仍不在向导范围。
+- `ExprBank` 七态（`smile` 末尾）、`smile → half` 别名已拆；`mouth_dir` 与
+  `smile_geometry.overlay` 在桌面运行时按静态常驻合成（素材分辨率一次）；
+  说话驱动排 v0.1.1。编辑器 `PetPreview` 首期不同步。测试以 `pytest -q` 当前结果为准。
 
 ### AI 对话（A1，默认关闭）
 
@@ -284,7 +284,8 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 
 - 模型 ID 与地址不写死；换模型只改配置，不改代码。
 - 词表在窗口启动时从 `expr_state.STATES` + `ActionBridge.registry` +
-  逐 SKU `effects.enabled` 反推一次，**不含 `blink` / `smile`**；改配置需重启生效。
+  逐 SKU `effects.enabled` 反推一次，**不含 `blink`**；`smile` 已接线并进词表；
+  改配置需重启生效。
 - 上下文只带最近 `history` 轮原文，不做滚动摘要或长期记忆。
 - 无 key / 断网 / 429 / 超时 / 乱码 → 静默回 idle，不弹错误气泡。
 - `mouth_dir` 已在桌面运行时消费；说话驱动、生成式候选、心跳、滚动摘要排 v0.1.1。

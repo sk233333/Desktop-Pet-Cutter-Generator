@@ -2,8 +2,17 @@
 
 > 基线：`origin/main = 5303995`；`tag v0.1 = fe5d76f` → commit `b03cdb7`（不动）。
 > 基线数字：本地 198 passed；干净 venv 194 passed, 1 skipped；工作树仅 `?? docs/images/`。
-> **本文不构成授权**。R2 动 `ExprBank.STATES` / `smile → half` 别名表之前，仍须显式授权；
-> `desktop_pet/` 与 `.github/` 在 R1 零 diff。
+> **R2 状态：已实现 / 已接线**（授权按 §7 单独发生；本文保留边界原文）。
+> **本文不构成授权**。
+>
+> R2 落地偏离登记：
+> - `mouth_open.verify` / `smile_geometry.verify` 的六态 golden 同步为七态，
+>   否则向导自检会在新状态表下误报；属必要连带。
+> - `tests/test_half_and_effects.py::test_build_call_forms` 改为
+>   `set(patches) == set(STATES) - {"smile"}`：smile 不烘焙贴片是设计而非遗漏。
+> - GUI 运行时用例加在既有 `tests/test_pet_window_mouth.py`，skip 仍是 1 个模块。
+> - 复用 `MouthOverlay` 加载器；`[mouth]` 前缀的 warn 文案对 smile 路径同样生效，
+>   未为一个前缀改 `mouth_overlay.py`。
 
 ## 0. 结论摘要（待审）
 
@@ -144,6 +153,7 @@ R2-A 阶段（状态已登记、消费未接线）`derive_allowed` 也继续排�
   B-1 状态改「已实现 / 已接线」；HANDOFF_V011 的 B-2 行、CHANGELOG 的 B-1 节、
   README 的补全器表**同一 commit**改完，避免三处两套话。
 - 若 R2 只做 A 不做 B，则 B-1 口径**一律不动**，并在回执里明说「B-2 消费未接线」。
+  （R2 实际已同时完成 A/B；B-1 口径已改为 `"pet_window"`，本节保留推导过程。）
 
 ## 6. Q6：断言与 commit 拆分
 

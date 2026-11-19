@@ -2,7 +2,37 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
-## B-1 配置期微笑几何数据槽（只产数据，未接线）
+## B-2 smile 独立状态（R2，已接线）
+
+### 行为变更
+
+- `ExprBank.STATES` 六态 → 七态（`smile` 放末尾，不挪旧下标）；删除
+  `'smile': 'half'` 别名，`from_agent("smile")` 原样返回 `smile`。
+- 运行时词表 `derive_allowed()` 含 `smile`；`clamp()` 放行，不再归一为 `normal`。
+- 渲染：PetWindow 读 `items[].smile_geometry.overlay` 合成；**不烘焙 ExprBank
+  贴片**，`apply("smile")` 无 patch 时原样返回（回退原帧，不是半眼）。
+- R2-A 中间态用 `_UNWIRED_STATES` 显式排除 `smile`；R2-B 接线同 commit 删除，
+  不存在「STATES 已含、词表悄悄含」的提交。
+- 素材已有 `mouth_dir` 时，B-1 生成侧不画嘴角弧（`mouth_arc: null`），避免双嘴。
+
+### 数据 / 兼容
+
+- `smile_geometry.runtime_consumer` 由 `null` 改为 `"pet_window"`；`mouth_arc`
+  可为 `null`，沿用可选字段先例，不升 schema，`validate_manifest` 放行。
+- `ExprBank.save()` 图集从六行变七行（`smile` 空 tile）；仓库内无调用方
+  （读码结论），外部图集需重生成，加载侧不自动兼容。
+- `anim.py:2049` docstring 仍写「6 个」；为守 `anim.py` 零字节不改，注释旧、
+  行为不变。
+- 向导 `allowed` 提案继续排除 `smile`（proposal-only），与运行时词表不是同一张表。
+
+### 测试
+
+- 本地 `pytest -q`：**209 passed**；干净 venv 五包：**203 passed, 1 skipped**
+  （唯一 skip 仍是 `tests/test_pet_window_mouth.py`，未新增 GUI 文件）。
+- 保护文件仅 `expr_state.py` 按授权变化；`anim.py` / `arbiter.py` / workflow /
+  `manifest_io.py` / schema / `effect_table.json` 零字节。
+
+## B-1 配置期微笑几何数据槽（B-2 后已接线）
 
 ### 行为变更
 
@@ -18,8 +48,8 @@
 - 新增可选数据槽 `items[].smile_geometry = {schema, preset, overlay,
   runtime_consumer, params, eyes[], mouth_arc, blush[]}`；`overlay` 指向
   `<stem>_smile.png`（独立 RGBA 覆盖层）。
-- `runtime_consumer: null` 表示当前无运行时读方；`preset` 只允许
-  `light / medium / strong`，几何数值按画布尺寸裁剪。
+- B-1 交付时 `runtime_consumer: null`；B-2 R2 已改为 `"pet_window"`。
+  `preset` 只允许 `light / medium / strong`，几何数值按画布尺寸裁剪。
 - `manifest_io.py` / `manifest.schema.json` 未改：沿用 `mouth_dir` 的先例，
   可选字段不升 schema，`validate_manifest` 原样放行。
 
@@ -27,7 +57,7 @@
 
 - Qt-free 断言在 `tests/test_smile_geometry.py`；`pytest -q` 以实际输出为准。
 - 三档状态：**已实现** = 几何生成器 + 并排预览 + 人工点选 + 独立覆盖层落盘；
-  **已接线** = 无（`runtime_consumer: null`）；**待拍板** = `smile` 独立状态（B-2）。
+  **已接线** = PetWindow 的 `smile` 分支（B-2 R2 完成）；**待拍板** = 无。
 
 ## 嘴型 overlay 运行时（T-M3 ~ T-M5）
 

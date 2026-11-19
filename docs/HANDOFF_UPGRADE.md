@@ -20,7 +20,7 @@
 | `schema_version` ≠ v2 | 只列「待迁移」告警，不阻塞 L1/L2 只读体检 |
 | C-U5 | 向导在 propose 阶段**只输出 `allowed` 提案文本**；`derive_allowed()` 未实现/未拍板前，任何写运行时词表的路径**判失败**。断言保留、编号不动 |
 | C-U10 | 「`effects.enabled` 与 `action_bridge` 配置不受影响」；做 commit 前后值快照逐项比对；向导**不得新增任何顶层配置键**；不存在的 `chat.enabled` 从规范删除 |
-| `smile` | Step 1 保留体检项，标 `v0.1.1 / 待状态拍板 / pending`，**不列为本轮可补**；`STATES` 六态、`smile → half` 别名、状态常量本轮一律不动 |
+| `smile` | Step 1 保留体检项，标 `v0.1.1 / 待状态拍板 / pending`，**不列为本轮可补**；`STATES` 六态、`smile → half` 别名、状态常量本轮一律不动。（**B-2 R2 已单独授权：STATES 七态、别名已拆；以 `HANDOFF_SMILE_B2.md` 与仓库代码为准，本行保留首期口径**） |
 | Q1 | 首期 = L1/L2 + `mask.from_ellipse` / `mask.domain_hint` / `mouth.open`；`expr.smile_geometry`、`calib.*`、L3 排 v0.1.1。三者各自独立走四段式，不打包 |
 | Q2 | 独立 `upgrade_wizard.py`（QDialog）+ 单入口唤起 + 注入 `_pet_engine_cache` / `PetPreview`；向导不持有引擎所有权，close 不 dispose、不重建；竖条页布局零改动 |
 | Q3 | L3 默认关闭；每次开启用**整份模块清单单次确认**后再加载（不逐项弹窗） |
@@ -77,7 +77,7 @@
 | `desktop_pet/upgrade_wizard.py` | PyQt6 六步 QDialog；只做 UI 与流程编排；引擎由外部注入 | PyQt6 + `upgrade_core` |
 | `tests/test_completers.py` | 三个补全器的 propose/preview/commit/verify；不含 Qt | numpy / cv2 / pytest |
 | `tests/test_upgrade_core.py` | SKU 扫描、一致性失败、快照、路径守卫、回滚、C-U5/C-U10 | 标准库 / pytest |
-| `tests/test_expr_states_invariant.py` | 六态表与 `smile → half` 不变式 | `expr_state` |
+| `tests/test_expr_states_invariant.py` | 六态表与 `smile → half` 不变式（当前仓库无此文件；B-2 落点是 `tests/test_smile_state_b2.py`） | `expr_state` |
 
 > CI 只装 5 个包（numpy / opencv-headless / pillow / matplotlib / pytest），**没有 PyQt6**。
 > 因此所有新增测试必须 Qt-free；`upgrade_wizard.py` 只做人工 offscreen 冒烟，不进 pytest。

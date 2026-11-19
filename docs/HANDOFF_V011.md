@@ -32,16 +32,20 @@
 
 | # | 事项 | 先定的边界 | 状态 |
 |---|---|---|---|
-| B-1 | 配置期补微笑（产贴片 / 产数据） | 只产数据，**不改 `ExprBank.STATES`、不加 `smile` 状态**；产出格式与存放位置先定；不改变运行时词表（C-M13 同口径） | 已实现 / 未接线（数据槽） |
-| B-2 | `smile` 独立状态 | 动 `STATES` + `smile → half` 别名表，直接撞 C-A8 / C-M13；需先单独出边界文档并显式授权，方可改动 `ExprBank.STATES` 与 `smile → half` 别名表；在此之前一律不动状态表，**不并入 B-1**。边界文档见 `docs/HANDOFF_SMILE_B2.md`（R1，待审，未授权） | 待拍板 |
+| B-1 | 配置期补微笑（产贴片 / 产数据） | 只产数据，**不改 `ExprBank.STATES`、不加 `smile` 状态**；产出格式与存放位置先定；不改变运行时词表（C-M13 同口径） | 已实现 / 已接线（PetWindow） |
+| B-2 | `smile` 独立状态 | 动 `STATES` + `smile → half` 别名表，直接撞 C-A8 / C-M13；需先单独出边界文档并显式授权，方可改动 `ExprBank.STATES` 与 `smile → half` 别名表；在此之前一律不动状态表，**不并入 B-1**。边界文档见 `docs/HANDOFF_SMILE_B2.md`（R1 已审 / R2 已授权） | 已实现 / 已接线（R2） |
 | B-3 | 生成式候选 provider（配置期） | 默认零网络；候选只在配置期产出，不进运行时取帧；写 manifest 前必须过 `validate_manifest` | 待拍板 |
 | B-4 | 说话驱动嘴型切档（接 A1 `chunk`） | 静态常驻 → 动态切档是另一条功能；只消费 A1 `chunk` 信号，不改 `arbiter` 通道矩阵；失败回静态 | 待拍板 |
 
-> **B-1 落地口径（已实现 / 未接线）**：补全器 `expr.smile_geometry` 只产
-> `items[].smile_geometry` + 独立覆盖层 `<stem>_smile.png`；不改 `STATES` /
-> `smile → half` 别名表 / `derive_allowed()` / 向导 `allowed` 提案。
-> `runtime_consumer: null`，当前无运行时读方。`smile` 独立状态仍是 B-2，
-> 需单独边界文档与显式授权，不并入本条。
+> **B-1 落地口径（已实现 / 已接线）**：补全器 `expr.smile_geometry` 只产
+> `items[].smile_geometry` + 独立覆盖层 `<stem>_smile.png`；B-1 本身不改
+> `STATES` / 别名表 / `derive_allowed()` / 向导 `allowed` 提案。
+> B-2 授权后 `runtime_consumer: "pet_window"`，PetWindow 在 `smile` 状态读该覆盖层。
+>
+> **B-2 落地口径（已实现 / 已接线）**：`STATES` 七态（`smile` 末尾）、
+> `smile → half` 别名已拆；运行时词表含 `smile`；渲染走 PetWindow 独立覆盖层，
+> **不烘焙 ExprBank 贴片**。`anim.py` / `arbiter.py` / workflow / manifest_io /
+> schema 仍零字节；向导 `allowed` 提案继续排除 `smile`（proposal-only）。
 
 ## 3. C 档：工程维护（小、可批量，每项单 commit）
 
@@ -95,8 +99,9 @@
 | 项 | 状态 |
 |---|---|
 | A-1 ~ A-4 人工作业 | 待人工 |
-| B-1 配置期微笑几何 | 已实现 / 未接线（数据槽） |
-| B-2 ~ B-4 边界 | 待拍板 / 未实现 |
+| B-1 配置期微笑几何 | 已实现 / 已接线（PetWindow） |
+| B-2 smile 独立状态 | 已实现 / 已接线（R2） |
+| B-3 ~ B-4 边界 | 待拍板 / 未实现 |
 | C-1 镜像相关 | 待确证 |
 | C 档工程维护 | C-1 待确证；C-2 ✅；C-3、C-4、C-5、C-6 ✅ |
 | D 全程约束 | 生效 |

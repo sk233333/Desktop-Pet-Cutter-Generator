@@ -156,13 +156,13 @@ class MouthOverlay:
 | C-M4 | `mouth_dir` 含 `..` 或绝对路径 → 拒绝加载，不读 SKU 目录外文件 |
 | C-M5 | 运行时零 manifest 写入；`git status` 无 manifest / mask PNG 变化。CI 版 `test_cm5_apply_200_frames_zero_writes` 比对字节 + mtime |
 | C-M6 | `anim.py` / `expr_state.py` / `arbiter.py` / manifest v2 / 摆动线零 diff；CI 版额外断言这些模块不引用 `mouth_overlay` |
-| C-M7 | `STATES` 六态、`smile → half` 别名、`apply()` 签名不变；不新增 `mouth` 状态（CI 版 `test_cm7_*`） |
+| C-M7 | `STATES` 六态、`smile → half` 别名、`apply()` 签名不变；不新增 `mouth` 状态（CI 版 `test_cm7_*`）。**B-2 R2 授权后已重订为七态 / 无别名；本行保留 T-M5 当时口径** |
 | C-M8 | 两条 SKU：一条有 overlay、一条无；互不串图（CI 版 `test_cm8_*`） |
 | C-M9 | 200 帧离屏（base / blink / expr / gaze 各 50）无异常、无尺寸漂移；真实帧循环留在 GUI 文件 |
 | C-M10 | 干净 venv 五包（无 PyQt6）跑 `pytest -q`，不低于当前基线；Qt-free 用例全过，**仅 `test_pet_window_mouth.py` 一个文件整体 skip（skip ≤ 1）** |
 | C-M11 | `mouth_dir` 为空字符串 / `None` / 非字符串 → 按无 overlay 处理，不抛异常 |
 | C-M12 | 覆盖层 alpha 全 0 → 按无 overlay 处理（见 C-M3d），不 warn 刷屏 |
-| C-M13 | 有 / 无 `mouth_dir` 时 `derive_allowed()` 输出逐项相同；**不得**因补嘴型把 `smile` 加进词表 |
+| C-M13 | 有 / 无 `mouth_dir` 时 `derive_allowed()` 输出逐项相同；**不得**因补嘴型把 `smile` 加进词表。**B-2 R2 后 `smile` 因独立状态接线进词表，但仍与 `mouth_dir` 无关；本条继续钉死** |
 
 ## 6. MUST NOT
 
