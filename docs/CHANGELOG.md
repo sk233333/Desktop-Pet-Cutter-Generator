@@ -2,6 +2,54 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## AI 生成动作参数 / 表情（本地未 push）
+
+### 行为变更
+
+- 主界面齿轮旁新增 **AI** 圆形按钮：「模型接口」弹窗填写请求地址 / 模型 ID /
+  API 密钥，可点「测试连接」发一条极短请求；保存写入本地 `ai_motion.json`。
+- 主页「AI 切割（框手动）」：框必须人画，SAM/GrabCut 只做框内像素；不再让
+  视觉模型猜框，图片也不上传。模型框太小/为空导致的失败随之消失。
+- 主界面「贴内层黑边」默认勾选；AI 切割开始前恢复「要切成什么？」提示，
+  文字只用于提示框选和预览标题，不上传、不参与分割。
+- SAM 返回 <0.5% 的异常小掩膜时自动整图重估，仍无效才提示换手动/补点。
+- LongCat 的思考开关按官方参数发 `thinking={"type":"disabled"}`（不再发布尔值），
+  视觉框实测从 49s 降到 2~3s；其它兼容服务保留 4096 tokens / 90s 兜底。
+- 只拿到 `reasoning_content` 时提示「增大 max_tokens 或换非推理模型」。
+- 设置「动作参数」组新增「AI 生成参数…」：用独立 `ai_motion.json` 调
+  OpenAI 兼容 `chat/completions`，一次返回九项 `items[].anim`、逐区域
+  `hair[] / cloth[]` 的 `amp / dir / bias`，以及 `joy / sleepy` 两个表情覆盖层。
+- AI 只给几何参数，不发明状态名；joy / sleepy 是封闭白名单，写入
+  `items[].expr_overlays`，运行时由 PetWindow 读 `<stem>_joy.png` /
+  `<stem>_sleepy.png` 合成，缺文件回退原帧。
+- 默认零网络：只有点按钮才发请求；缺 `base_url` / `model` / 密钥
+  （弹窗保存或环境变量 `DESKTOP_PET_AI_MOTION_KEY`）时在发请求前直接失败，
+  参数不动。
+- 返回的 JSON 逐项夹取（anim 九项 / SWAY_RANGES / smile_geometry 参数区间）；
+  弹窗逐项勾选，「当前 → 建议」可见；未勾选字段逐字节保持原值。
+- 任何失败（网络 / 429 / 5xx / 非 JSON / 结构不对 / 写盘失败）都整体回手动，
+  不产生半份参数。
+
+### 数据格式
+
+- `ExprBank.STATES` 七态 → 九态（`joy`、`sleepy` 追加在末尾，不挪旧下标）；
+  ExprBank 不为这两个状态烘焙贴片，`apply()` 无 patch 时原样返回。
+- manifest 仅新增可选字段 `items[].expr_overlays`
+  （`{状态: {overlay, source, params}}`），不升 schema；
+  `validate_manifest` 不拒绝未知 item 字段。
+- 覆盖层 PNG 与 manifest patch 都作为 `ChangeSet.files` /
+  `ChangeSet.manifest_patch` 交给 `upgrade_core.commit_changes()`；
+  不新增第二条写盘路径，不改 base / mask，失败整体回滚。
+
+### 测试
+
+- 测试数与 hash 以 `pytest -q` / `git log` 当前结果为准，本文不写死。
+- `test_ai_motion.py` 用 fake provider / 注入 opener，CI 永不连真实 API。
+- `joy / sleepy` 不注册 `expr_state.STATES`，只做覆盖层键：运行时
+  `smile → joy`、`half → sleepy`；默认勾选为零，逐项确认后才写入。
+- 保护文件自 `7531ff3` 零 diff（含 `expr_state.py`）；tag `v0.1` 不移动；
+  无权重、无新依赖。硬约束与 Go/No-Go 见 `HANDOFF_AI_MOTION.md` §8。
+
 ## AI 生成候选入口（B-3 首期，本地未 push）
 
 ### 行为变更
