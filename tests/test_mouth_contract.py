@@ -14,8 +14,8 @@ from expr_state import STATES  # noqa: E402
 
 
 def test_derive_allowed_ignores_mouth_dir():
+    # C-M13：词表与 mouth_dir 无关；smile 是否在词表由状态/接线决定。
     out = derive_allowed("sku", STATES, {"wave": 1}, None)
-    assert "smile" not in out["emotion"]
     assert "blink" not in out["emotion"]
     assert out["action"] == ["wave"]
     # 词表只从 STATES / registry / effects 反推，不读 manifest item

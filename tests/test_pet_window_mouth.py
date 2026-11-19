@@ -123,6 +123,37 @@ def test_tm3_expr_uses_render_source(tmp_path):
         w.close()
 
 
+def test_b2_smile_overlay_renders_on_smile_state(tmp_path):
+    """B-2：smile 状态走配置期独立覆盖层，不依赖 ExprBank 贴片。"""
+    _, asset, item, _ = make_sku(tmp_path, mouth=False, smile=True)
+    w = win(asset, item)
+    try:
+        assert w._smile is not None
+        got, _ = w._expr_frame("smile")
+        assert np.any(got[..., 1] > 200)          # 覆盖层的绿色带出现在帧里
+    finally:
+        w.close()
+
+
+def test_b2_no_smile_overlay_falls_back_to_render_frame(tmp_path):
+    """没有 smile_geometry 时 apply('smile') 原样返回：不会变半眼。"""
+    _, asset, item, _ = make_sku(tmp_path, mouth=False)
+    w = win(asset, item)
+
+    class _Bank:
+        def apply(self, frame, state):
+            assert state == "smile"
+            return frame
+
+    asset.expr_bank = lambda: _Bank()
+    try:
+        assert w._smile is None
+        got, _ = w._expr_frame("smile")
+        assert np.array_equal(got, resize_rgba(w._render_rgba, w.base.height()))
+    finally:
+        w.close()
+
+
 def test_tm4_zero_writes_and_200_frames(tmp_path):
     """GUI 专属：真实帧循环跑 200 帧；Qt-free 的文件哈希版在
     `tests/test_mouth_runtime_ci.py::test_cm5_apply_200_frames_zero_writes`。

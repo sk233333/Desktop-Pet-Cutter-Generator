@@ -6,7 +6,8 @@
 恒为 ``null``，当前没有运行时读方（已实现 / 未接线）。
 
 几何组合只包含三项：眼睛轻眯、嘴角弧、腮红 alpha；不复刻 ``mouth.open``
-的三档微笑嘴贴片。覆盖层不覆盖原图、不改 base / mask。
+的三档微笑嘴贴片。覆盖层不覆盖原图、不改 base / mask。素材已有
+``mouth_dir`` 时生成侧不画嘴角弧（``mouth_arc: null``），避免运行时双嘴。
 """
 
 from __future__ import annotations
@@ -95,8 +96,12 @@ def _pick_eyes(item: dict) -> list[dict]:
 
 
 def _geometry(eyes: list[dict], width: int, height: int,
-              params: dict) -> dict:
-    """纯几何：眼睑线 / 嘴角弧 / 腮红椭圆；全部夹进画布。"""
+              params: dict, with_arc: bool = True) -> dict:
+    """纯几何：眼睑线 / 嘴角弧 / 腮红椭圆；全部夹进画布。
+
+    ``with_arc=False``（素材已有 ``mouth_dir``）时 ``mouth_arc`` 为 ``None``，
+    避免运行时双嘴；其余几何不变。
+    """
     n = len(eyes)
     ex = sum(e["cx"] for e in eyes) / n
     ey = sum(e["cy"] for e in eyes) / n
@@ -123,7 +128,7 @@ def _geometry(eyes: list[dict], width: int, height: int,
                          + max(6.0, ry * 1.8), 0.0, height - 1.0), 3),
         "half": round(_fit(half, 1.0, width * 0.45), 3),
         "height": round(_fit(arc_h, 1.0, height * 0.20), 3),
-    }
+    } if with_arc else None
 
     blush = []
     for e in eyes:
@@ -150,9 +155,9 @@ def _color(eyes: list[dict]) -> tuple[int, int, int, int]:
 
 
 def _draw(canvas: np.ndarray, eyes: list[dict], width: int, height: int,
-          preset: str) -> np.ndarray:
+          preset: str, with_arc: bool = True) -> np.ndarray:
     params = _params(preset)
-    geom = _geometry(eyes, width, height, params)
+    geom = _geometry(eyes, width, height, params, with_arc=with_arc)
     color = _color(eyes)
     thick = 2 if max(width, height) >= 256 else 1
 
@@ -173,19 +178,20 @@ def _draw(canvas: np.ndarray, eyes: list[dict], width: int, height: int,
         cv2.polylines(canvas, [np.array(pts, np.int32)], False, color, thick)
 
     m = geom["mouth_arc"]
-    pts = []
-    for t in np.linspace(-1.0, 1.0, 17):
-        pts.append((int(round(m["cx"] + t * m["half"])),
-                    int(round(m["cy"] + m["height"] * (1.0 - t * t)))))
-    cv2.polylines(canvas, [np.array(pts, np.int32)], False, color, thick)
+    if m is not None:
+        pts = []
+        for t in np.linspace(-1.0, 1.0, 17):
+            pts.append((int(round(m["cx"] + t * m["half"])),
+                        int(round(m["cy"] + m["height"] * (1.0 - t * t)))))
+        cv2.polylines(canvas, [np.array(pts, np.int32)], False, color, thick)
     return canvas
 
 
-def _slot(payload: dict, preset: str) -> dict:
+def _slot(payload: dict, preset: str, with_arc: bool = True) -> dict:
     params = _params(preset)
     name = f"{payload['stem']}_smile.png"
     geom = _geometry(payload["eyes"], int(payload["width"]),
-                     int(payload["height"]), params)
+                     int(payload["height"]), params, with_arc=with_arc)
     return {
         "schema": SCHEMA,
         "preset": preset,
@@ -234,10 +240,12 @@ def preview(cand: Candidate, engine=None) -> OverlayImage:
     preset = str(p.get("preset") or DEFAULT_PRESET)
     if preset not in PRESETS:
         preset = DEFAULT_PRESET
+    with_arc = not bool(p.get("has_mouth"))
     base = load_base_rgb(p["sku_dir"], p["stem"])
     overlay = np.zeros((int(p["height"]), int(p["width"]), 4), np.uint8)
-    _draw(overlay, p["eyes"], int(p["width"]), int(p["height"]), preset)
-    extra = "；已有 mouth_dir，嘴角弧仅作预览/数据" if p.get("has_mouth") else ""
+    _draw(overlay, p["eyes"], int(p["width"]), int(p["height"]), preset,
+          with_arc=with_arc)
+    extra = "；已有 mouth_dir，本覆盖层不含嘴角弧（避免双嘴）" if not with_arc else ""
     return OverlayImage(
         base=base, overlay=overlay,
         note=f"{cand.note}（当前档：{preset}{extra}）")
@@ -248,9 +256,11 @@ def commit(cand: Candidate) -> ChangeSet:
     preset = str(p.get("preset") or DEFAULT_PRESET)
     if preset not in PRESETS:
         preset = DEFAULT_PRESET
+    with_arc = not bool(p.get("has_mouth"))
     canvas = np.zeros((int(p["height"]), int(p["width"]), 4), np.uint8)
-    _draw(canvas, p["eyes"], int(p["width"]), int(p["height"]), preset)
-    slot = _slot(p, preset)
+    _draw(canvas, p["eyes"], int(p["width"]), int(p["height"]), preset,
+          with_arc=with_arc)
+    slot = _slot(p, preset, with_arc=with_arc)
     return ChangeSet(
         sku=p["sku"], completer=COMPLETER_ID, candidate_id=cand.id,
         files={slot["overlay"]: encode_png(canvas)},

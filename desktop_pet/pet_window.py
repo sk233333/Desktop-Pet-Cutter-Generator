@@ -191,6 +191,8 @@ class PetWindow(QWidget):
         self._mouth = self._load_mouth_overlay(item)
         self._render_rgba = (self._mouth.apply(asset.rgba)
                              if self._mouth is not None else asset.rgba)
+        # B-2：smile 走配置期独立覆盖层，不依赖 ExprBank 贴片
+        self._smile = self._load_smile_overlay(item)
         self.raw_blink = (self._blink_frames_from(self._render_rgba)
                           if (blink and asset.blink_on) else [])
         self.blink_enabled = blink and bool(self.raw_blink)
@@ -620,6 +622,8 @@ class PetWindow(QWidget):
             if state == "blink":
                 frames = self.raw_blink or self._blink_frames_from(self._render_rgba)
                 base = frames[-1] if frames else self._render_rgba
+            elif state == "smile" and self._smile is not None:
+                base = self._smile.apply(self._render_rgba)
             else:
                 base = self.asset.expr_bank().apply(self._render_rgba, state)
             # 贴片是在素材分辨率上烘焙的，先在原尺寸合成再缩到显示高度
@@ -814,6 +818,43 @@ class PetWindow(QWidget):
             item = hits[0]
         name = mouth_name(item, src.stem)
         if not name:
+            return None
+        return MouthOverlay.load(src.parent, name, self.asset.rgba.shape[:2])
+
+    def _load_smile_overlay(self, item: dict | None):
+        """B-2：读 items[].smile_geometry.overlay；失败一律 None（回退原帧）。
+
+        与嘴型覆盖层同一套加载规则（路径守卫 / 尺寸 / 损坏 / 全透明都返回
+        None）；产物来自配置期 B-1，不是 ExprBank 贴片。
+        """
+        src = self.asset.source
+        if src is None:
+            return None
+        src = Path(src)
+        if not isinstance(item, dict):
+            man = src.parent / "manifest.json"
+            if not man.is_file():
+                return None
+            try:
+                data = read_manifest(man)
+            except Exception:
+                return None
+            hits, _ = match_items(data.get("items") or [], src)
+            if len(hits) > 1:
+                key = (str(man), src.stem, "smile-dup", len(hits))
+                if key not in _MOUTH_WARNED:
+                    _MOUTH_WARNED.add(key)
+                    print(f"[smile] {man.name}: stem={src.stem} 命中 "
+                          f"{len(hits)} 条，跳过", file=sys.stderr)
+                return None
+            if not hits:
+                return None
+            item = hits[0]
+        slot = item.get("smile_geometry")
+        if not isinstance(slot, dict):
+            return None
+        name = slot.get("overlay")
+        if not isinstance(name, str) or not name:
             return None
         return MouthOverlay.load(src.parent, name, self.asset.rgba.shape[:2])
 

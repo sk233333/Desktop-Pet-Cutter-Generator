@@ -169,6 +169,34 @@ def test_b1_geometry_stays_inside_canvas():
         assert b["rx"] > 0 and b["ry"] > 0
 
 
+def test_b2_smile_overlay_omits_arc_when_mouth_dir(tmp_path):
+    """B-2：已有 mouth_dir 时生成侧不画嘴角弧，避免运行时双嘴。"""
+    d = _sku(tmp_path / "demo", "demo", "pet")
+    mp = d / "manifest.json"
+    data = json.loads(mp.read_text(encoding="utf-8"))
+    data["items"][0]["mouth_dir"] = "pet_mouth_smile.png"
+    mp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                  encoding="utf-8")
+
+    info = _info(d)
+    cand = smile_geometry.propose(info, info.manifest)[0]
+    assert cand.payload["has_mouth"] is True
+    cs = smile_geometry.commit(cand)
+    slot = cs.manifest_patch["items/0/smile_geometry"]
+    assert slot["mouth_arc"] is None
+
+    res = commit_changes(info, cs)
+    assert res.report.ok, res.report.text
+    out = read_manifest(mp)
+    ok, msg = validate_manifest(out)
+    assert ok, msg
+    assert out["items"][0]["smile_geometry"]["mouth_arc"] is None
+    assert out["items"][0]["mouth_dir"] == "pet_mouth_smile.png"
+
+    img = cv2.imread(str(d / "pet_smile.png"), cv2.IMREAD_UNCHANGED)
+    assert img.shape == (H, W, 4) and (img[..., 3] > 0).any()
+
+
 def test_b1_two_skus_do_not_cross(tmp_path):
     da = _sku(tmp_path / "a", "a", "a_pet")
     db = _sku(tmp_path / "b", "b", "b_pet")

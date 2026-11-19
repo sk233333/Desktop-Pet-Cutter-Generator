@@ -19,7 +19,8 @@ from pet_window import PetWindow  # noqa: E402
 BASE_SRC = ROOT / "assets" / "custom" / "bgy_001_pet.png"
 
 
-def make_sku(tmp: Path, *, mouth: bool, bad: str | None = None):
+def make_sku(tmp: Path, *, mouth: bool, bad: str | None = None,
+             smile: bool = False):
     d = tmp / ("with" if mouth else "without")
     d.mkdir(parents=True)
     shutil.copyfile(BASE_SRC, d / "pet.png")
@@ -27,6 +28,14 @@ def make_sku(tmp: Path, *, mouth: bool, bad: str | None = None):
     h, w = np.array(im).shape[:2]
     item = {"stem": "pet", "files": ["pet.png"]}
     bbox = None
+    if smile:
+        name = "pet_smile.png"
+        ov = np.zeros((h, w, 4), np.uint8)
+        ov[int(h * 0.80):int(h * 0.85), :] = (0, 255, 0, 255)
+        Image.fromarray(ov, "RGBA").save(d / name)
+        item["smile_geometry"] = {"overlay": name,
+                                  "runtime_consumer": "pet_window",
+                                  "preset": "medium"}
     if mouth:
         name = "pet_mouth_smile.png"
         if bad == "size":

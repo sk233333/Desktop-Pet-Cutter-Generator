@@ -283,11 +283,16 @@ def test_clamp_truncates_and_normalizes():
     assert ok == {"text": "好", "emotion": "half", "action": "wave"}
 
 
-def test_derive_allowed_excludes_blink_and_smile():
+def test_derive_allowed_excludes_blink():
     allowed = cc.derive_allowed("bgy", STATES, {}, None)
     assert "blink" not in allowed["emotion"]
-    assert "smile" not in allowed["emotion"]
-    assert allowed["emotion"] == ["normal", "half", "surprise", "wink_l", "wink_r"]
+    assert allowed["emotion"] == ["normal", "half", "surprise", "wink_l",
+                                  "wink_r", "smile"]
+
+
+def test_derive_allowed_includes_wired_smile():
+    allowed = cc.derive_allowed("bgy", STATES, {}, None)
+    assert "smile" in allowed["emotion"]
 
 
 def test_derive_allowed_trims_per_sku_effects():
