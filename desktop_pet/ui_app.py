@@ -3480,6 +3480,13 @@ class LaunchUI(QWidget):
             "体检当前 SKU：补眼眶 socket / 嘴型覆盖层，逐候选人工确认；本地运行、不联网")
         self.btn_upgrade.clicked.connect(self._open_upgrade_wizard)
         rw.addWidget(self.btn_upgrade)
+        # 新建 SKU：手动切割 / AI 生成二选一；AI 只出候选，默认手动
+        self.btn_new_sku = QPushButton("新建 SKU…")
+        self.btn_new_sku.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_new_sku.setToolTip(
+            "新建 SKU：默认手动切割；AI 生成只出候选，逐项人工确认后走同一落盘闸门")
+        self.btn_new_sku.clicked.connect(self._open_new_sku_wizard)
+        rw.addWidget(self.btn_new_sku)
         rw.addWidget(self.btn_start)
         rw.addWidget(self.ck_launch)
         rw.addWidget(g_log)
@@ -5012,6 +5019,16 @@ class LaunchUI(QWidget):
             return
         eng = getattr(self, "_pet_engine_cache", None)
         dlg = UpgradeWizard(self, engine=eng)
+        dlg.exec()
+
+    def _open_new_sku_wizard(self):
+        """懒加载新建 SKU 向导；AI 生成只出候选，写盘仍走统一闸门。"""
+        try:
+            from new_sku_wizard import NewSkuWizard
+        except Exception as exc:              # noqa: BLE001
+            QMessageBox.warning(self, "新建 SKU", f"无法加载向导：{exc}")
+            return
+        dlg = NewSkuWizard(self)
         dlg.exec()
 
     def _save_source(self):
