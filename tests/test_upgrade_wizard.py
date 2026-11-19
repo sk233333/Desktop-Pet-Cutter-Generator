@@ -20,7 +20,8 @@ if str(ROOT / "desktop_pet") not in sys.path:
 
 import upgrade_core                                   # noqa: E402
 from anim import load_eye_slots                       # noqa: E402
-from completers import mask_domain_hint, mask_ellipse, mouth_open  # noqa: E402
+from completers import (mask_domain_hint, mask_ellipse, mouth_open,  # noqa: E402
+                        smile_geometry)
 from completers.base import (Candidate, ChangeSet, PathGuardError,  # noqa: E402
                              guard_paths)
 from expr_state import STATES, ExprState              # noqa: E402
@@ -102,7 +103,7 @@ def test_real_assets_scan_is_consistent():
 def test_propose_preview_commit_verify_never_writes(sku_dir):
     before = _snapshot(sku_dir)
     info = _info(sku_dir)
-    for mod in (mask_ellipse, mask_domain_hint, mouth_open):
+    for mod in (mask_ellipse, mask_domain_hint, mouth_open, smile_geometry):
         for cand in mod.propose(info, info.manifest):
             mod.preview(cand, engine=None)
             if cand.kind == "mask":

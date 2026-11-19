@@ -520,6 +520,9 @@ _PROTECTED_SHA256 = {
     "anim.py": "c20598180ab41f834adf824e26875c85c16d7030aa27e01814803bddde4da85a",
     "arbiter.py": "08d812e95dc46d01e3f31d02fb72bb8b15a7bd7fb6cb02539fda8b3c35a0497d",
     "expr_state.py": "9e2803b48c425fbb00c564e8780bc59bf8fa6daa471fd22bb461958955c185db",
+    "manifest_io.py": "6353734dd357b5495fb092bddde1d9d46ecb51f4aa07aec3f63f35f5fa7b81c3",
+    "manifest.schema.json": "bfdffce4013b100bca041b553b77555e91657fbbab2d4af91b42ff408cfa7021",
+    "effect_table.json": "1b4c293778c5c59fd72e435f7f5cd438207c028d1bb23c42abf3ebadff6eb983",
 }
 _WORKFLOW_SHA256 = "2f1b3cd6b663b87cf373386ec417e92385e342baf08995e908774bf2c3314b3a"
 
