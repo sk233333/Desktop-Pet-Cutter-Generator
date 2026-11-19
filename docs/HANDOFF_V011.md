@@ -34,7 +34,7 @@
 |---|---|---|---|
 | B-1 | 配置期补微笑（产贴片 / 产数据） | 只产数据，**不改 `ExprBank.STATES`、不加 `smile` 状态**；产出格式与存放位置先定；不改变运行时词表（C-M13 同口径） | 已实现 / 已接线（PetWindow） |
 | B-2 | `smile` 独立状态 | 动 `STATES` + `smile → half` 别名表，直接撞 C-A8 / C-M13；需先单独出边界文档并显式授权，方可改动 `ExprBank.STATES` 与 `smile → half` 别名表；在此之前一律不动状态表，**不并入 B-1**。边界文档见 `docs/HANDOFF_SMILE_B2.md`（R1 已审 / R2 已授权） | 已实现 / 已接线（R2） |
-| B-3 | 生成式候选 provider（配置期） | 默认零网络；候选只在配置期产出，不进运行时取帧；写 manifest 前必须过 `validate_manifest` | 待拍板 |
+| B-3 | 生成式候选 provider（配置期） | 默认零网络；候选只在配置期产出，不进运行时取帧；写 manifest 前必须过 `validate_manifest`。首期收窄为「AI 出候选、人确认、同一闸门落盘」，见 `docs/HANDOFF_AI_GENERATE.md` | 已实现（本地未 push） |
 | B-4 | 说话驱动嘴型切档（接 A1 `chunk`） | 静态常驻 → 动态切档是另一条功能；只消费 A1 `chunk` 信号，不改 `arbiter` 通道矩阵；失败回静态 | 待拍板 |
 
 > **B-1 落地口径（已实现 / 已接线）**：补全器 `expr.smile_geometry` 只产
@@ -101,7 +101,8 @@
 | A-1 ~ A-4 人工作业 | 待人工 |
 | B-1 配置期微笑几何 | 已实现 / 已接线（PetWindow） |
 | B-2 smile 独立状态 | 已实现 / 已接线（R2） |
-| B-3 ~ B-4 边界 | 待拍板 / 未实现 |
+| B-3 配置期 AI 候选 provider | 已实现（本地未 push，见 `HANDOFF_AI_GENERATE.md`） |
+| B-4 说话驱动嘴型切档 | 待拍板 / 未实现 |
 | C-1 镜像相关 | 待确证 |
 | C 档工程维护 | C-1 待确证；C-2 ✅；C-3、C-4、C-5、C-6 ✅ |
 | D 全程约束 | 生效 |

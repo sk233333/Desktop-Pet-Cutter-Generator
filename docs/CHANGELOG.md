@@ -2,6 +2,36 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## AI 生成候选入口（B-3 首期，本地未 push）
+
+### 行为变更
+
+- 新建 SKU 增加「手动切割（默认）/ AI 生成」二选一入口（`new_sku_wizard`）。
+  「AI 一键」收窄为**一次请求出全部候选 + 逐项人工确认**，不等于自动写盘。
+- AI 只出 soft alpha / 区域框 / 置信度 / warnings / 出处类别；不做表情贴片、
+  不注册 STATES、不端到端自动成品。
+- 默认零网络：`ai_generate.json` 不存在或 `enabled=false` 时不发请求；
+  上传默认关，显式勾选后才发送原图字节（不发路径 / key / 日志）。
+- 失败（缺 key / 超时 / 429 / 5xx / 非 JSON / 候选全无效 / 写盘失败）一律
+  整体回手动，不留半份 SKU，不产生临时目录。
+
+### 数据格式
+
+- 新 SKU 的 base 由 soft alpha × 原图生成，只作为 `ChangeSet.files` 交给
+  `upgrade_core.commit_changes()`；已有 base 拒绝覆盖。
+- manifest 仅新增可选字段 `items[].ai_provenance`
+  （provider 类别 / confidence / warnings / 是否上传），不升 schema。
+- 预览 PNG 同为 `ChangeSet.files`；不写 mask PNG。
+- `upgrade_core.commit_changes()` 新增唯一行为：manifest 不存在且调用方给出
+  内存 v2 骨架时以其为起点；写盘仍只有这一条路径，失败清理本次新建空目录。
+
+### 测试
+
+- 本地 `pytest -q`：**231 passed**；干净 venv 五包：**225 passed, 1 skipped**
+  （唯一 skip 仍是 GUI 文件，未新增 GUI 测试）。
+- `test_aig_*` 22 个节点，fake provider / 注入 opener；真实 API 不进 CI。
+- 保护文件自 `7531ff3` 零 diff；tag `v0.1` 不移动；无权重、无新依赖。
+
 ## B-2 smile 独立状态（R2，已接线）
 
 ### 行为变更
