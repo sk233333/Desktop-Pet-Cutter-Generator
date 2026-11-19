@@ -171,3 +171,16 @@ git push origin main          # 唯一一次
 | W4~W7 | 未开始（随 W3 红线停止） |
 | W8 Go/No-Go → push → v0.2 | 未开始（未 push、未打 v0.2） |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
+
+### 8.1 W0~W2 收口实测
+
+- 本地 `pytest -q` 与干净 venv（`MPLBACKEND=Agg`）全绿；skip 仍为 1 个
+  GUI 模块；具体数字以命令当前结果为准。
+- 保护文件 7 项自 `7531ff3` 零 diff；`expr_state.py` 哈希 `c14c92c…`。
+- 工作树仅 `?? docs/images/`；`origin/main` 仍 `7531ff3`；未 push、未打 v0.2。
+- Go/No-Go：①②④⑤ 通过；③ 因 W6 未接线标 N/A，不阻塞其余四项。
+- W3 停线：`manifest.schema.json` 的 item 没有 `eyes` / `mouth` 字段；
+  眼眶走 `_eyes.png` + parts，嘴是 `mouth_dir` 数据槽。自动标注要么改
+  `manifest_io` / schema，要么自动判真眼（已明确禁止），触发 §7 红线。
+- W2 的本地 GroundingDINO/SAM2 权重路线未接线；当前交付为 API 文本引导
+  实验入口，默认关、勾选即同意上传；4 张真实素材评测因 A 档未到登记未标定。
