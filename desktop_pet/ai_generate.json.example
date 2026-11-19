@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "provider": "<provider 类别占位，由用户按服务方文档填写>",
+  "base_url": "<由用户按服务方官方文档填写>",
+  "model": "<由用户按服务方官方文档填写>",
+  "key_env": "DESKTOP_PET_AI_GENERATE_KEY",
+  "timeout_ms": 15000,
+  "max_image_bytes": 8388608,
+  "upload_consent": false,
+  "cache_dir": "<用户本地缓存目录>",
+  "thinking": false
+}

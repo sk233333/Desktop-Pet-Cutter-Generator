@@ -252,11 +252,19 @@ def commit_changes(info: SkuInfo, changeset: ChangeSet,
             Report(True, ["无变更：未写盘（只读候选 / 整体否决）"]),
             merged=copy.deepcopy(info.manifest))
 
-    try:
-        raw = info.manifest_path.read_bytes()
-        data = json.loads(raw.decode("utf-8"))
-    except Exception as exc:                 # noqa: BLE001
-        return CommitResult(Report(False, [f"读 manifest 失败：{exc}"]))
+    if info.manifest_path.exists():
+        try:
+            raw = info.manifest_path.read_bytes()
+            data = json.loads(raw.decode("utf-8"))
+        except Exception as exc:             # noqa: BLE001
+            return CommitResult(Report(False, [f"读 manifest 失败：{exc}"]))
+    elif isinstance(info.manifest, dict):
+        # 新建 SKU：manifest 尚不存在，以调用方给的内存 v2 骨架为起点。
+        # 仍只有这一条写盘路径；失败时连本次新建的空目录一起清掉。
+        data = copy.deepcopy(info.manifest)
+    else:
+        return CommitResult(
+            Report(False, ["读 manifest 失败：manifest.json 不存在且无内存骨架"]))
 
     migrated, rows = False, []
     if data.get("schema_version") != SCHEMA_VERSION:
@@ -286,6 +294,13 @@ def commit_changes(info: SkuInfo, changeset: ChangeSet,
         return CommitResult(Report(True, lines), merged=merged,
                             migrated=migrated, rows=rows, changed=changed)
 
+    missing_dirs: list[Path] = []
+    for p in [info.manifest_path, *targets]:
+        parent = Path(p).parent
+        while not parent.exists() and parent not in missing_dirs:
+            missing_dirs.append(parent)
+            parent = parent.parent
+
     snap = snapshot_files([info.manifest_path, *targets])
     written: list[str] = []
     try:
@@ -298,6 +313,7 @@ def commit_changes(info: SkuInfo, changeset: ChangeSet,
         )
     except Exception as exc:                 # noqa: BLE001
         _restore(snap)
+        _remove_empty_dirs(missing_dirs)
         return CommitResult(Report(False, [f"落盘失败，已整体回滚：{exc}"]),
                             merged=merged, migrated=migrated, rows=rows,
                             changed=changed, before=snap)
@@ -305,6 +321,16 @@ def commit_changes(info: SkuInfo, changeset: ChangeSet,
     lines.append(f"写入：{', '.join(written) if written else '(无覆盖层)'}")
     return CommitResult(Report(True, lines), merged=merged, migrated=migrated,
                         rows=rows, changed=changed, written=written, before=snap)
+
+
+def _remove_empty_dirs(dirs: list[Path]) -> None:
+    """回滚后清理本次新建的空目录；非空或已存在的一律不动。"""
+    for d in sorted(set(dirs), key=lambda p: len(p.parts), reverse=True):
+        try:
+            if d.exists() and d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+        except OSError:
+            pass
 
 
 def rollback(result: CommitResult) -> Report:

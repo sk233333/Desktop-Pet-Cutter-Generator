@@ -24,3 +24,7 @@ Punctuation_selection_of_images/image/
 desktop_pet/agent.json
 *.local.json
 .env
+
+# AI 生成入口：本地配置与候选缓存不入库（模板仍提交）
+desktop_pet/ai_generate.json
+desktop_pet/.ai_cache/
