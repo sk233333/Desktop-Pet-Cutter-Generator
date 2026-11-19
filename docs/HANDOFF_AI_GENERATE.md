@@ -4,6 +4,9 @@
 > 在 G9 全绿前禁止 `git push`。测试数 / hash 以 `pytest -q` / `git log`
 > 当前结果为准，本文不写死。硬约束与 Go/No-Go 见
 > `HANDOFF_AI_MOTION.md` §8。
+>
+> W1：向导 AI 抠图的 fake 端到端已补（候选 → ChangeSet → validate → 读回）；
+> 真实 rembg 模型下载受环境限制，登记为环境限制，不阻塞手动。
 
 ## 1. 目标与红线
 

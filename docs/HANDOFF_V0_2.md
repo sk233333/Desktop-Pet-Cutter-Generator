@@ -164,7 +164,10 @@ git push origin main          # 唯一一次
 | R2 `7531ff3` / B-2 结案 / tag `v0.1` = `fe5d76f` → `b03cdb7` | ✅ |
 | 三处硬冲突已修（恢复字节 / 封闭覆盖层键 / 默认零勾选 + ignore + 去快照） | ✅ |
 | 补 1~补 6 并入 `HANDOFF_AI_MOTION.md` §8 | ✅ |
-| W0 三处收口 + 3 个本地 commit | 进行中 |
-| W1~W7 | 未开始 |
-| W8 Go/No-Go → push → v0.2 | 未开始 |
+| W0 三处收口 + 3 个本地 commit | ✅ |
+| W1 向导 AI 抠图 fake 端到端 | ✅（真实 rembg 下载受限，登记环境限制） |
+| W2 文本引导切割（API 实验入口） | ✅ 默认关、勾选即同意上传、失败回手动；本地 GroundingDINO/SAM2 权重路线未接线，4 张真实素材评测因 A 档未到登记未标定 |
+| W3 AI 自动标注 | ⛔ 红线：眼眶/嘴缺少 manifest 字段，需动 schema 或自动判真眼 |
+| W4~W7 | 未开始（随 W3 红线停止） |
+| W8 Go/No-Go → push → v0.2 | 未开始（未 push、未打 v0.2） |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |

@@ -94,7 +94,8 @@ JSON 对象；勾选项为空；覆盖层渲染为空（缺眼睛标注）；写
 2. **两条入口别合并**：新建页「AI 切割（框手动）」= 本地、图片不上传；
    向导 `ai_generate.json` 的 `remote(/ai/candidates)` = 会发图，必须显式
    同意、只发原图、日志不打 URL / 路径 / 原图名；默认 local 或手动。
-   向导 AI 抠图仍标「未端到端验证」，不阻塞手动。
+   向导 AI 抠图：fake 端到端已验证；真实 rembg 下载受限登记为环境限制，
+   不阻塞手动。
 3. **AI 输出必须 clamp 到七态 + allowed**：`joy/sleepy` 是封闭覆盖层候选；
    模型吐任意状态名 → 归 `normal`；不注册新 STATES、不碰
    `expr_state.py`、不喂 `derive_allowed()`。**「七态不再增加」指保持
