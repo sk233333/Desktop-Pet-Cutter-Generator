@@ -29,11 +29,11 @@ from ai_generate_provider import (FakeProvider, HttpAIProvider,  # noqa: E402
 
 BASE_COMMIT = "7531ff3"
 TAG_COMMIT = "b03cdb7"          # tag v0.1 不得移动
-# AI 动作生成授权：expr_state.py 仅允许在 STATES 末尾增加 joy / sleepy，
-# 因此不再列入本测试的零 diff 保护名单（其余文件仍必须逐字节不变）。
+# v0.2 基线：expr_state.py 重新归零字节保护（joy/sleepy 只做覆盖层键）。
 PROTECTED = (
     "desktop_pet/anim.py",
     "desktop_pet/arbiter.py",
+    "desktop_pet/expr_state.py",
     "desktop_pet/manifest_io.py",
     "desktop_pet/manifest.schema.json",
     "desktop_pet/effect_table.json",
@@ -143,6 +143,31 @@ def test_aig_local_transport_no_consent_or_key(tmp_path):
     fake = FakeProvider()
     out = propose_candidates(fake, _req((8, 8)), cfg, env={})
     assert [c.id for c in out] == ["fake-1"]
+
+
+def test_aig_end_to_end_fake_candidate_to_manifest(tmp_path):
+    """W1：fake 候选 → ChangeSet → commit → validate → 读回。"""
+    from ai_generate_adapter import (build_changeset, commit_selected,
+                                     new_sku_info)
+    from manifest_io import read_manifest, validate_manifest
+
+    rgb = np.full((8, 8, 3), 200, np.uint8)
+    cand = AIGenCandidate(id="c1", alpha=np.ones((8, 8), np.float32) * 0.8,
+                          confidence=0.9, box=[0, 0, 8, 8])
+    cs = build_changeset(sku="demo", stem="pet", rgb=rgb, selected=[cand],
+                         provider="fake", uploaded=False)
+    info = new_sku_info("demo", root=tmp_path)
+    result = commit_selected(info, cs)
+    assert result.report.ok, result.report
+    manifest = read_manifest(tmp_path / "demo" / "manifest.json")
+    ok, msg = validate_manifest(manifest)
+    assert ok, msg
+    assert manifest["schema_version"] == 2
+    item = manifest["items"][0]
+    assert item["stem"] == "pet"
+    assert item["ai_provenance"]["provider"] == "fake"
+    assert (tmp_path / "demo" / "pet.png").exists()
+    assert (tmp_path / "demo" / "pet_ai_preview.png").exists()
 
 
 def test_aig_local_provider_missing_dependency(monkeypatch):
