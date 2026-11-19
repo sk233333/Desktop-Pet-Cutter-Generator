@@ -519,7 +519,8 @@ def test_c5_bias_is_per_region_not_motion_cfg():
 _PROTECTED_SHA256 = {
     "anim.py": "c20598180ab41f834adf824e26875c85c16d7030aa27e01814803bddde4da85a",
     "arbiter.py": "08d812e95dc46d01e3f31d02fb72bb8b15a7bd7fb6cb02539fda8b3c35a0497d",
-    "expr_state.py": "9e2803b48c425fbb00c564e8780bc59bf8fa6daa471fd22bb461958955c185db",
+    # B-2 R2 授权范围：仅 STATES 行与 from_agent 别名行；其余字节不变。
+    "expr_state.py": "ca4e6ee9ab087474b901c35712a09545657a52061395b65e618729fe4b7ba638",
     "manifest_io.py": "6353734dd357b5495fb092bddde1d9d46ecb51f4aa07aec3f63f35f5fa7b81c3",
     "manifest.schema.json": "bfdffce4013b100bca041b553b77555e91657fbbab2d4af91b42ff408cfa7021",
     "effect_table.json": "1b4c293778c5c59fd72e435f7f5cd438207c028d1bb23c42abf3ebadff6eb983",
@@ -535,10 +536,12 @@ def test_c5_protected_files_byte_identical():
     assert hashlib.sha256(wf.read_bytes()).hexdigest() == _WORKFLOW_SHA256
 
 
-def test_c5_state_table_and_alias_unchanged():
+def test_c5_state_table_golden_and_apply_params_signature():
     from expr_state import STATES, ExprState
 
-    assert STATES == ("normal", "blink", "half", "surprise", "wink_l", "wink_r")
-    assert "'smile': 'half'" in inspect.getsource(ExprState.from_agent)
+    # B-2 R2 授权后：七态、无 smile→half 别名；摆动参数入口签名不变。
+    assert STATES == ("normal", "blink", "half", "surprise", "wink_l",
+                      "wink_r", "smile")
+    assert "'smile': 'half'" not in inspect.getsource(ExprState.from_agent)
     assert list(inspect.signature(HairField.apply_params).parameters) == [
         "self", "params"]

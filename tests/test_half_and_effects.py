@@ -72,7 +72,9 @@ def test_build_call_forms(eye_scene, tmp_path):
     assert ExprBank.build(L, s, tmp_path / "mouth").patches["half"] is not None
     b = ExprBank.build(L, s, mouth_dir=tmp_path / "m", half_drop=0.2)
     assert b.patches["half"] is not None
-    assert set(STATES) <= set(b.patches)
+    # B-2：smile 由 PetWindow 侧的配置期覆盖层渲染，不在 ExprBank 烘焙贴片。
+    assert set(b.patches) == set(STATES) - {"smile"}
+    assert "smile" not in b.patches
 
 
 # ---------------- B12：surprise 不缩放整个眼球，lash 逐像素不变 ----------------

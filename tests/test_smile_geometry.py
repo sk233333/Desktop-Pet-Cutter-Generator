@@ -18,7 +18,7 @@ if str(ROOT / "desktop_pet") not in sys.path:
 
 from completers import smile_geometry                        # noqa: E402
 from completers.registry import entries as completer_entries  # noqa: E402
-from expr_state import STATES, ExprState                     # noqa: E402
+
 from manifest_io import read_manifest, validate_manifest      # noqa: E402
 from upgrade_core import (allowed_proposal, commit_changes,   # noqa: E402
                           load_sku, scan_skus)
@@ -118,7 +118,8 @@ def test_b1_overlay_is_independent_and_slot_has_no_consumer(tmp_path):
     assert slot["schema"] == smile_geometry.SCHEMA
 
 
-def test_b1_vocabulary_and_state_table_unchanged(tmp_path):
+def test_b1_data_slot_does_not_touch_vocabulary(tmp_path):
+    """B-1 的不变式：数据槽不改向导提案；状态表口径由 B-2 节点单独钉。"""
     d = _sku(tmp_path / "demo", "demo", "pet")
     info = _info(d)
     before = allowed_proposal(info.manifest)
@@ -128,9 +129,6 @@ def test_b1_vocabulary_and_state_table_unchanged(tmp_path):
     assert allowed_proposal(info.manifest) == before
     assert "smile" not in before["allowed"]
     assert before["runtime_consumer"] is None
-    assert "smile" not in STATES
-    assert STATES == ("normal", "blink", "half", "surprise", "wink_l", "wink_r")
-    assert ExprState().from_agent("smile") == "half"
 
     src = (ROOT / "desktop_pet" / "completers" / "smile_geometry.py").read_text(
         encoding="utf-8")

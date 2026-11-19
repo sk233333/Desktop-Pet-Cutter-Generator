@@ -319,11 +319,12 @@ def verify(changeset: ChangeSet, sku_dir=None, manifest_after=None) -> Report:
 
     try:
         from expr_state import STATES
-        if STATES != ('normal', 'blink', 'half', 'surprise', 'wink_l', 'wink_r'):
+        if STATES != ('normal', 'blink', 'half', 'surprise', 'wink_l',
+                      'wink_r', 'smile'):
             ok = False
             lines.append(f"ExprBank.STATES 被改动：{STATES}")
         else:
-            lines.append("ExprBank.STATES 六态未变（未注册 smile）")
+            lines.append("ExprBank.STATES 新 golden 未变（七态）")
     except Exception as exc:                 # noqa: BLE001
         lines.append(f"STATES 检查跳过：{exc}")
     return Report(ok, lines)

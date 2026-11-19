@@ -221,13 +221,13 @@ def test_cm6_protected_modules_untouched():
 
 # ---------------------------------------------------------------- C-M7
 
-def test_cm7_state_table_alias_signature_unchanged():
+def test_cm7_state_table_golden_and_apply_signature():
+    # B-2 R2 授权后：smile 是独立状态，别名已拆除；apply 签名不变。
     assert STATES == ("normal", "blink", "half", "surprise",
-                      "wink_l", "wink_r")
-    assert "smile" not in STATES
+                      "wink_l", "wink_r", "smile")
     assert list(inspect.signature(ExprBank.apply).parameters) == [
         "self", "frame", "state"]
-    assert "'smile': 'half'" in inspect.getsource(ExprState.from_agent)
+    assert "'smile': 'half'" not in inspect.getsource(ExprState.from_agent)
 
 
 # ---------------------------------------------------------------- C-M8

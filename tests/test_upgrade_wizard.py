@@ -253,8 +253,10 @@ def test_mouth_open_adds_overlay_and_keeps_state_table(sku_dir):
     assert img is not None and img.shape[:2] == (120, 140)
     assert (img[..., 3] > 0).any()
 
-    assert STATES == ('normal', 'blink', 'half', 'surprise', 'wink_l', 'wink_r')
-    assert ExprState().from_agent("smile") == "half"
+    assert STATES == ('normal', 'blink', 'half', 'surprise', 'wink_l',
+                      'wink_r', 'smile')
+    assert "mouth" not in STATES
+    assert ExprState().from_agent("smile") == "smile"
 
 
 # ---------------------------------------------------------------- C-U8

@@ -159,6 +159,11 @@ def _enabled_states(enabled: set[str]) -> set[str]:
     return out
 
 
+# B-2 R2-A 中间态：状态表已含 smile，但消费（PetWindow 覆盖层）尚未接线。
+# 接线提交里必须删掉这个集合；不允许出现「STATES 已含、词表悄悄含」的提交。
+_UNWIRED_STATES = ("smile",)
+
+
 def derive_allowed(sku: str, expr_states, action_registry, effects_cfg) -> dict:
     """从运行时真实产物反推词表。
 
@@ -179,7 +184,8 @@ def derive_allowed(sku: str, expr_states, action_registry, effects_cfg) -> dict:
 
     emos = ["normal"]
     for state in states:
-        if state in ("blink", "smile", "normal"):
+        # B-2 R2-A：smile 已登记、消费未接线；接线同 commit 删除 _UNWIRED_STATES
+        if state in ("blink", "normal") or state in _UNWIRED_STATES:
             continue
         if keep is not None and state not in keep:
             continue

@@ -14,7 +14,7 @@
 """
 import cv2, numpy as np, json, os, time, random
 
-STATES = ('normal', 'blink', 'half', 'surprise', 'wink_l', 'wink_r')
+STATES = ('normal', 'blink', 'half', 'surprise', 'wink_l', 'wink_r', 'smile')
 
 
 def _over(dst, src):
@@ -402,7 +402,7 @@ class ExprState:
 
     def from_agent(self, emotion, action=None):
         """对接对话模块的 {text, emotion, action} —— 只认 emotion，action 交给物理层。"""
-        alias = {'smile': 'half', 'jito': 'half', 'wink_left': 'wink_l',
+        alias = {'jito': 'half', 'wink_left': 'wink_l',
                  'wink_right': 'wink_r', 'shy': 'half', 'angry': 'half',
                  'happy': 'surprise', 'sad': 'half'}
         return self.set(alias.get(emotion, emotion))
