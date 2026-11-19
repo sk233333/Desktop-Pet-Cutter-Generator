@@ -519,7 +519,7 @@ def test_c5_bias_is_per_region_not_motion_cfg():
 _PROTECTED_SHA256 = {
     "anim.py": "c20598180ab41f834adf824e26875c85c16d7030aa27e01814803bddde4da85a",
     "arbiter.py": "08d812e95dc46d01e3f31d02fb72bb8b15a7bd7fb6cb02539fda8b3c35a0497d",
-    # B-2 R2 授权范围：仅 STATES 行与 from_agent 别名行；其余字节不变。
+    # 新基线（7531ff3）：expr_state.py 恢复零字节保护，joy/sleepy 只做覆盖层
     "expr_state.py": "ca4e6ee9ab087474b901c35712a09545657a52061395b65e618729fe4b7ba638",
     "manifest_io.py": "6353734dd357b5495fb092bddde1d9d46ecb51f4aa07aec3f63f35f5fa7b81c3",
     "manifest.schema.json": "bfdffce4013b100bca041b553b77555e91657fbbab2d4af91b42ff408cfa7021",
@@ -539,7 +539,7 @@ def test_c5_protected_files_byte_identical():
 def test_c5_state_table_golden_and_apply_params_signature():
     from expr_state import STATES, ExprState
 
-    # B-2 R2 授权后：七态、无 smile→half 别名；摆动参数入口签名不变。
+    # joy/sleepy 不注册 STATES，只作为覆盖层键；smile→half 别名仍不存在。
     assert STATES == ("normal", "blink", "half", "surprise", "wink_l",
                       "wink_r", "smile")
     assert "'smile': 'half'" not in inspect.getsource(ExprState.from_agent)

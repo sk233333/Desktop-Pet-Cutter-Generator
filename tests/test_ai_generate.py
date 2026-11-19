@@ -29,10 +29,11 @@ from ai_generate_provider import (FakeProvider, HttpAIProvider,  # noqa: E402
 
 BASE_COMMIT = "7531ff3"
 TAG_COMMIT = "b03cdb7"          # tag v0.1 不得移动
+# AI 动作生成授权：expr_state.py 仅允许在 STATES 末尾增加 joy / sleepy，
+# 因此不再列入本测试的零 diff 保护名单（其余文件仍必须逐字节不变）。
 PROTECTED = (
     "desktop_pet/anim.py",
     "desktop_pet/arbiter.py",
-    "desktop_pet/expr_state.py",
     "desktop_pet/manifest_io.py",
     "desktop_pet/manifest.schema.json",
     "desktop_pet/effect_table.json",
