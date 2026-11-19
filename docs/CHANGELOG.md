@@ -17,8 +17,11 @@
   文本 → 模型出框 → 本地切割，失败自动回手动；日志不打原图名。
 - 向导 AI 抠图补 fake 端到端（候选 → ChangeSet → validate → 读回）；
   真实 rembg 模型下载受限，登记为环境限制。
-- W3 AI 自动标注按红线暂停：眼眶/嘴缺少 manifest 字段，需动 schema 或
-  自动判真眼；未 push、未打 v0.2。
+- W3 AI 自动标注改为只读报告：新增 `ai_annotate.py` 与「AI 标注报告…」
+  入口，输出眼眶/嘴/发缕/摆动候选坐标；不写 manifest、不改 schema、
+  不自动判真眼。
+- W4 在语义红线处暂停：`angry/sad/shy` 不注册 STATES，映射到已有状态
+  属产品决策；B-4 说话驱动嘴型另需切档口径。未 push、未打 v0.2。
 - LongCat 的思考开关按官方参数发 `thinking={"type":"disabled"}`（不再发布尔值），
   视觉框实测从 49s 降到 2~3s；其它兼容服务保留 4096 tokens / 90s 兜底。
 - 只拿到 `reasoning_content` 时提示「增大 max_tokens 或换非推理模型」。

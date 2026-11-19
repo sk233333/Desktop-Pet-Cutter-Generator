@@ -42,6 +42,8 @@
 
 - 源图：`launch.save_cut_source()`，手动 / AI 共用，只写
   `<stem>.png` + `<stem>_mask.png`；不写 manifest / 覆盖层 / 最终透明素材。
+  这是**新建期**的初始 mask；调参期 `test_c5_bias_meta_only_keeps_masks_untouched`
+  的「字节 / mtime 不变」是另一条口径，两者不冲突。
 - 候选产物：manifest patch / 覆盖层仍走 `upgrade_core.commit_changes()`，
   不绕过 `validate_manifest` / 原子写 / 回滚。
 - 断言：`test_ai_cut_source_path_is_shared_and_commit_free`
@@ -84,6 +86,7 @@
 ```bash
 python3 -m pytest -q
 python3 -m pytest --collect-only -q | grep -E 'test_aig_|test_agent_|test_ai_'
+# 注意：匹配串含 test_ai_*；70 不是 25 的增长量，不拿差值当新增断言数
 python3 -m py_compile desktop_pet/*.py
 # 干净 venv 五包 + MPLBACKEND=Agg + import PyQt6 → ModuleNotFoundError
 QT_QPA_PLATFORM=offscreen python3 desktop_pet/ui_app.py
@@ -166,9 +169,11 @@ git push origin main          # 唯一一次
 | 补 1~补 6 并入 `HANDOFF_AI_MOTION.md` §8 | ✅ |
 | W0 三处收口 + 3 个本地 commit | ✅ |
 | W1 向导 AI 抠图 fake 端到端 | ✅（真实 rembg 下载受限，登记环境限制） |
-| W2 文本引导切割（API 实验入口） | ✅ 默认关、勾选即同意上传、失败回手动；本地 GroundingDINO/SAM2 权重路线未接线，4 张真实素材评测因 A 档未到登记未标定 |
-| W3 AI 自动标注 | ⛔ 红线：眼眶/嘴缺少 manifest 字段，需动 schema 或自动判真眼 |
-| W4~W7 | 未开始（随 W3 红线停止） |
+| W2 文本引导切割（API 实验入口） | ✅ 默认关、勾选即同意上传、失败回手动；模型框只是候选，切割预览里人工确认后才保存；本地 GroundingDINO/SAM2 权重路线未接线，4 张真实素材评测因 A 档未到登记未标定 |
+| W2 上传通道 | 文本引导用独立的 `ai_motion.json` 同意开关；W1 remote 用 `ai_generate.json` 的 `upload_consent`；两者不合并 |
+| W3 AI 自动标注（只读报告） | ✅ `ai_annotate.py` + 「AI 标注报告…」按钮；不写 manifest、不改 schema、不自动判真眼 |
+| W4 更多表情 / 动作 | ⛔ 语义红线：`angry/sad/shy` 不注册 STATES，映射到哪个已有状态属产品决策；B-4 说话驱动嘴型另需切档语义 |
+| W5~W7 | 未开始（随 W4 语义红线停止） |
 | W8 Go/No-Go → push → v0.2 | 未开始（未 push、未打 v0.2） |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
 
@@ -178,9 +183,16 @@ git push origin main          # 唯一一次
   GUI 模块；具体数字以命令当前结果为准。
 - 保护文件 7 项自 `7531ff3` 零 diff；`expr_state.py` 哈希 `c14c92c…`。
 - 工作树仅 `?? docs/images/`；`origin/main` 仍 `7531ff3`；未 push、未打 v0.2。
-- Go/No-Go：①②④⑤ 通过；③ 因 W6 未接线标 N/A，不阻塞其余四项。
-- W3 停线：`manifest.schema.json` 的 item 没有 `eyes` / `mouth` 字段；
-  眼眶走 `_eyes.png` + parts，嘴是 `mouth_dir` 数据槽。自动标注要么改
-  `manifest_io` / schema，要么自动判真眼（已明确禁止），触发 §7 红线。
+- Go/No-Go：①②④⑤ 通过；③ 按 W0 口径标 **N/A（Agent 未接线）**，
+  由 W6 的 `test_agent_*` 闭环，**不是当前阻塞项**。当前不能 push 的原因是
+  W3 红线未解 + W4~W8 未做，不是 ③。
+- W3 按选 2 落地：`ai_annotate.py` 只产 `AnnotationReport`，坐标同时给
+  归一化与像素值；不引用 `manifest_io` / `commit_changes`，不写文件；
+  眼部候选超过两个只写 warning，不自动判真眼。UI 入口「AI 标注报告…」，
+  上传前二次确认，报告只读。
+- W4 停线：`angry/sad/shy` 不能注册 STATES（`expr_state.py` 保护），
+  把它们映射到已有状态（如 angry→surprise、sad→half、shy→smile）会改变
+  生产行为语义；B-4 说话驱动嘴型还需要嘴型切档的产品口径。按 §7 停下，
+  待拍板后再做，不擅自定映射。
 - W2 的本地 GroundingDINO/SAM2 权重路线未接线；当前交付为 API 文本引导
   实验入口，默认关、勾选即同意上传；4 张真实素材评测因 A 档未到登记未标定。
