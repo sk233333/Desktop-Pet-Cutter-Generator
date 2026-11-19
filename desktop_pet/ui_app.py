@@ -1075,12 +1075,13 @@ class _AIMotionDialog(QDialog):
 class _AICutPromptDialog(QDialog):
     """AI 抠图前问「要切成什么」；跳过 = 按画面主体切。"""
 
-    def __init__(self, parent=None, initial_outline=True):
+    def __init__(self, parent=None, initial_outline=True, upload=False):
         super().__init__(parent)
         self.result_text = None          # None=取消；""=跳过
         self.subject_text = ""
         self.outline = bool(initial_outline)
         self._manual_outline = False
+        self.upload = bool(upload)
         self.setWindowTitle("AI 识别抠图")
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
@@ -1092,8 +1093,12 @@ class _AICutPromptDialog(QDialog):
         head.setFont(f)
         lay.addWidget(head)
 
-        tip = QLabel("描述要保留的主体（如「中间的兔子」），只用于提示你框选，"
-                     "不会上传；切割由框和下面的黑边选项决定。")
+        tip = QLabel(
+            "描述要保留的主体（如「中间的兔子」），会随图片发送给模型；"
+            "返回的框仍可在预览里确认。"
+            if self.upload else
+            "描述要保留的主体（如「中间的兔子」），只用于提示你框选，"
+            "不会上传；切割由框和下面的黑边选项决定。")
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#8d99a8;")
         lay.addWidget(tip)
@@ -3639,6 +3644,14 @@ class LaunchUI(QWidget):
         self.ck_outline.setChecked(True)
         self.ck_outline.setEnabled(False)
         mode_row.addWidget(self.ck_outline)
+        self.ck_text_guide = QCheckBox("文本引导（会上传图片）")
+        self.ck_text_guide.setToolTip(
+            "实验：把原图和描述发给模型取框，失败自动回手动；"
+            "默认关，勾选即表示同意上传当前图片")
+        self.ck_text_guide.setChecked(False)
+        self.ck_text_guide.setEnabled(False)
+        self.ck_text_guide.toggled.connect(self._sync_cut_mode)
+        mode_row.addWidget(self.ck_text_guide)
         mode_row.addStretch(1)
         v.addLayout(mode_row)
         right.addWidget(g_img)
@@ -5689,6 +5702,7 @@ class LaunchUI(QWidget):
         self.rb_cut_manual.setEnabled(not busy)
         self.rb_cut_ai.setEnabled(not busy)
         self.ck_outline.setEnabled(not busy and self.rb_cut_ai.isChecked())
+        self.ck_text_guide.setEnabled(not busy and self.rb_cut_ai.isChecked())
         for b in (self.btn_eyes, self.btn_sway):
             b.setEnabled(not busy and cut)
         self.btn_table.setEnabled(not busy and cut)
@@ -5718,8 +5732,12 @@ class LaunchUI(QWidget):
             return
         self.log.clear()
         if self.rb_cut_ai.isChecked():
-            # 框由人定，AI 只做框内切割（SAM/GrabCut），不再让视觉模型猜框
-            self._run_task(lambda: self._cut_flow(auto_seg=True))
+            if self.ck_text_guide.isChecked():
+                # 实验入口：勾选即同意上传；失败回手动框选
+                self._run_task(self._ai_cut_flow)
+            else:
+                # 默认：框由人定，AI 只做框内切割（SAM/GrabCut）
+                self._run_task(lambda: self._cut_flow(auto_seg=True))
         else:
             self._run_task(self._cut_flow)
 
@@ -5729,11 +5747,18 @@ class LaunchUI(QWidget):
             return
         if hasattr(self, "ck_outline"):
             self.ck_outline.setEnabled(self.rb_cut_ai.isChecked())
+        if hasattr(self, "ck_text_guide"):
+            self.ck_text_guide.setEnabled(self.rb_cut_ai.isChecked())
         if self.rb_cut_ai.isChecked():
-            self.btn_start.setText("开始处理（手动框选 + AI 切割）")
-            self.btn_start.setToolTip(
-                "先手动框住主体，再由 SAM/GrabCut 自动切割；"
-                "可勾选「贴内层黑边」去掉外层白边")
+            if self.ck_text_guide.isChecked():
+                self.btn_start.setText("开始处理（文本引导，图片会上传）")
+                self.btn_start.setToolTip(
+                    "描述和原图会发送到模型取框；失败自动回手动框选")
+            else:
+                self.btn_start.setText("开始处理（手动框选 + AI 切割）")
+                self.btn_start.setToolTip(
+                    "先手动框住主体，再由 SAM/GrabCut 自动切割；"
+                    "可勾选「贴内层黑边」去掉外层白边")
         else:
             self.btn_start.setText("开始处理（框取手办并抠图）")
             self.btn_start.setToolTip("框取手办并抠图")
@@ -5760,7 +5785,7 @@ class LaunchUI(QWidget):
             return self._cut_flow()
 
         self._step("第 1 步 · 读图")
-        print(f"[AI 1/3] 读图 {Path(path).name}")
+        print("[AI 1/3] 读图")
         im = Image.open(path)
         rgba = np.array(self._rotated_rgba(im))
         rgb = rgba[..., :3].copy()
@@ -5776,11 +5801,15 @@ class LaunchUI(QWidget):
             issues = validate_config(cfg)
             if issues:
                 return fallback("；".join(issues))
-            dlg = _AICutPromptDialog(self)
+            dlg = _AICutPromptDialog(
+                self, initial_outline=self.ck_outline.isChecked(), upload=True)
             if dlg.exec() != QDialog.DialogCode.Accepted:
                 raise Cancelled()
             instruction = dlg.subject_text or ""
             outline = bool(dlg.outline)
+            self.ck_outline.setChecked(outline)
+            if not instruction:
+                return fallback("未填写文本引导描述")
             self._step("第 2 步 · AI 识别主体…",
                        "贴内层黑边" if outline
                        else "图片和描述会发送到模型接口；只取前景框，抠图仍在本机")
