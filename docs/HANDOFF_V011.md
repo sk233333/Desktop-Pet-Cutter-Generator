@@ -33,7 +33,7 @@
 | # | 事项 | 先定的边界 | 状态 |
 |---|---|---|---|
 | B-1 | 配置期补微笑（产贴片 / 产数据） | 只产数据，**不改 `ExprBank.STATES`、不加 `smile` 状态**；产出格式与存放位置先定；不改变运行时词表（C-M13 同口径） | 已实现 / 未接线（数据槽） |
-| B-2 | `smile` 独立状态 | 动 `STATES` + `smile → half` 别名表，直接撞 C-A8 / C-M13；需先单独出边界文档并显式授权，方可改动 `ExprBank.STATES` 与 `smile → half` 别名表；在此之前一律不动状态表，**不并入 B-1** | 待拍板 |
+| B-2 | `smile` 独立状态 | 动 `STATES` + `smile → half` 别名表，直接撞 C-A8 / C-M13；需先单独出边界文档并显式授权，方可改动 `ExprBank.STATES` 与 `smile → half` 别名表；在此之前一律不动状态表，**不并入 B-1**。边界文档见 `docs/HANDOFF_SMILE_B2.md`（R1，待审，未授权） | 待拍板 |
 | B-3 | 生成式候选 provider（配置期） | 默认零网络；候选只在配置期产出，不进运行时取帧；写 manifest 前必须过 `validate_manifest` | 待拍板 |
 | B-4 | 说话驱动嘴型切档（接 A1 `chunk`） | 静态常驻 → 动态切档是另一条功能；只消费 A1 `chunk` 信号，不改 `arbiter` 通道矩阵；失败回静态 | 待拍板 |
 
