@@ -949,6 +949,32 @@ class _AIMotionWorker(QThread):
         self.ready.emit(proposal)
 
 
+class _AnnotateWorker(QThread):
+    """W3：只读标注报告，后台线程，不写 manifest。"""
+
+    ready = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, image_bytes, instruction="", parent=None):
+        super().__init__(parent)
+        self._image = image_bytes
+        self._instruction = instruction
+
+    def run(self):
+        from ai_annotate import build_report
+        from ai_motion_contract import AIGenError, load_config
+        try:
+            report = build_report(self._image, load_config(),
+                                  instruction=self._instruction)
+        except AIGenError as exc:
+            self.failed.emit(str(exc))
+            return
+        except Exception:                        # noqa: BLE001
+            self.failed.emit("AI 标注报告失败；未写入任何文件")
+            return
+        self.ready.emit(report)
+
+
 class _AIPingWorker(QThread):
     """模型接口「测试连接」：后台发一条极短请求，不冻结弹窗。"""
 
@@ -4122,6 +4148,13 @@ class LaunchUI(QWidget):
             "与 joy/sleepy 表情；逐项勾选后才写入 manifest")
         self.btn_ai_motion.clicked.connect(self._open_ai_motion)
         ag.addWidget(self.btn_ai_motion, 9, 0, 1, 2)
+        self.btn_ai_annotate = QPushButton("AI 标注报告…")
+        self.btn_ai_annotate.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_ai_annotate.setToolTip(
+            "只读报告：把当前切割图发给模型，返回眼眶/嘴/发缕/摆动候选坐标；"
+            "不写 manifest，真眼由人确认")
+        self.btn_ai_annotate.clicked.connect(self._open_ai_annotate)
+        ag.addWidget(self.btn_ai_annotate, 10, 0, 1, 2)
         v.addWidget(g_anim)
 
         tip = QLabel("改完直接关掉即可：动作参数立刻作用在画布上的桌宠，"
@@ -5478,6 +5511,61 @@ class LaunchUI(QWidget):
         if box["error"]:
             raise AIGenError(box["error"])
         return box["proposal"]
+
+    def _open_ai_annotate(self):
+        """W3：只读标注报告；不上传前不弹，不写 manifest。"""
+        st = self._cut
+        if not st:
+            QMessageBox.information(self, "AI 标注报告",
+                                    "请先完成切割，再生成标注报告。")
+            return
+        ans = QMessageBox.question(
+            self, "AI 标注报告",
+            "会把当前切割图发送给模型，生成只读坐标报告。\n"
+            "不会写 manifest，也不会自动判定真眼。继续？")
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        x0, y0, x1, y1 = [int(v) for v in st["box"]]
+        crop = st["rgb"][y0:y1, x0:x1]
+        m = st["mask"][y0:y1, x0:x1]
+        white = np.full_like(crop, 255)
+        white[m > 0] = crop[m > 0]
+        ok, buf = cv2.imencode(".png", cv2.cvtColor(white, cv2.COLOR_RGB2BGR))
+        if not ok:
+            QMessageBox.warning(self, "AI 标注报告", "图片编码失败")
+            return
+        self.btn_ai_annotate.setEnabled(False)
+        self._annotate_worker = _AnnotateWorker(buf.tobytes(), parent=self)
+
+        def _done(report):
+            self._show_annotate_report(report, white.shape[1], white.shape[0])
+
+        def _fail(msg):
+            QMessageBox.warning(self, "AI 标注报告", msg)
+
+        self._annotate_worker.ready.connect(_done)
+        self._annotate_worker.failed.connect(_fail)
+        self._annotate_worker.finished.connect(
+            lambda: self.btn_ai_annotate.setEnabled(True))
+        self._annotate_worker.start()
+
+    def _show_annotate_report(self, report, width, height):
+        from ai_annotate import format_report
+        dlg = QDialog(self)
+        dlg.setWindowTitle("AI 标注报告（只读）")
+        dlg.resize(600, 460)
+        v = QVBoxLayout(dlg)
+        note = QLabel("只读报告：不写 manifest，不自动判真眼。\n"
+                      "请用现有眼眶 / 嘴 / 发缕 / 摆动工具照坐标人工补标。")
+        note.setWordWrap(True)
+        v.addWidget(note)
+        te = QPlainTextEdit(format_report(report, width, height))
+        te.setReadOnly(True)
+        v.addWidget(te)
+        btn = QPushButton("关闭")
+        btn.clicked.connect(dlg.accept)
+        v.addWidget(btn, 0, Qt.AlignmentFlag.AlignRight)
+        dlg.exec()
 
     def _open_ai_motion(self):
         """动作参数页入口：调 ai_motion.json → 逐项勾选 → 同一 commit_changes 落盘。"""
