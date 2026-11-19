@@ -1,5 +1,6 @@
 {
   "enabled": false,
+  "transport": "remote",
   "provider": "<provider 类别占位，由用户按服务方文档填写>",
   "base_url": "<由用户按服务方官方文档填写>",
   "model": "<由用户按服务方官方文档填写>",

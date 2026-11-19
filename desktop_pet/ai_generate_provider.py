@@ -120,6 +120,75 @@ class HttpAIProvider:
         return out
 
 
+_LOCAL_SESSIONS: dict[str, object] = {}
+
+
+class LocalMattingProvider:
+    """进程内本地分割（rembg）；零网络、不读 key、不上传。
+
+    依赖与模型都不进仓库：``rembg`` 只在真正调用时惰性导入，CI 五包不装；
+    模型文件由 rembg 下载到用户缓存目录（默认 ``~/.u2net``）。
+    首次加载较慢，调用方应放到后台线程。
+    """
+
+    name = "local_rembg"
+    default_model = "isnet-general-use"
+
+    def __init__(self, model: str | None = None):
+        self.model = model or self.default_model
+        self.calls = 0
+
+    def _guard(self, request: AIGenRequest, config: AIGenConfig) -> None:
+        if not config.enabled:
+            raise AIGenError("AI 生成未启用（默认手动，零网络）")
+        if config.transport != "local":
+            raise AIGenError("配置不是本地模式（transport != local）")
+        if len(request.image_bytes or b"") > config.max_image_bytes:
+            raise AIGenError("原图超过 max_image_bytes")
+
+    def _session(self):
+        model = self.model
+        if model not in _LOCAL_SESSIONS:
+            from rembg import new_session            # 惰性：CI 不装
+            _LOCAL_SESSIONS[model] = new_session(model)
+        return _LOCAL_SESSIONS[model]
+
+    def propose(self, request: AIGenRequest, config: AIGenConfig) -> list[AIGenCandidate]:
+        self._guard(request, config)
+        try:
+            from rembg import remove
+        except ImportError as exc:
+            raise AIGenError("未安装本地分割依赖 rembg（可选安装，不进仓库）") from exc
+        try:
+            raw = remove(request.image_bytes, session=self._session(),
+                         only_mask=True)
+        except AIGenError:
+            raise
+        except Exception as exc:                 # noqa: BLE001
+            raise AIGenError("本地推理失败") from exc
+        self.calls += 1
+
+        if isinstance(raw, bytes):
+            img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+        else:
+            img = np.asarray(raw)
+        if img is None or img.size == 0:
+            raise AIGenError("本地分割没有返回可用掩膜")
+        alpha = img.astype(np.float32)
+        if alpha.max() > 1.0:
+            alpha /= 255.0
+        if request.width and request.height \
+                and alpha.shape[:2] != (request.height, request.width):
+            alpha = cv2.resize(alpha, (request.width, request.height),
+                               interpolation=cv2.INTER_LINEAR)
+        alpha = np.clip(alpha, 0.0, 1.0)
+        if float(alpha.max()) <= 0.0:
+            raise AIGenError("本地分割结果全透明")
+        return [AIGenCandidate(id="local-1", alpha=alpha, box=None,
+                               confidence=0.0,
+                               provenance={"category": "local"})]
+
+
 def _decode_candidate(raw, index: int) -> AIGenCandidate | None:
     """单条候选容错解析；损坏 / 尺寸不明的候选返回 None（由上层整体判定）。"""
     if not isinstance(raw, dict):

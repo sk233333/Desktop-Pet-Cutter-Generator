@@ -42,7 +42,8 @@ from PyQt6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication,
                              QGraphicsSimpleTextItem, QGraphicsView, QGroupBox,
                              QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                              QLineEdit, QMessageBox, QPlainTextEdit,
-                             QProgressBar, QPushButton, QScrollArea,
+                             QProgressBar, QPushButton, QRadioButton,
+                             QScrollArea,
                              QSizePolicy, QSlider, QSpinBox, QStackedWidget, QStyle,
                              QStyleOptionButton, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
@@ -948,6 +949,16 @@ class LogWriter:
 
     def flush(self):
         pass
+
+
+def _local_ai_status() -> tuple[bool, str]:
+    """主界面可用性检查：只查依赖是否安装，不 import rembg（太重）。"""
+    import importlib.util
+
+    if importlib.util.find_spec("rembg") is None:
+        return False, ("未安装本地分割依赖 rembg（可选安装，不进仓库）；"
+                       "手动框选不受影响")
+    return True, ""
 
 
 class PreviewBoard(QWidget):
@@ -3199,6 +3210,27 @@ class LaunchUI(QWidget):
             "background:#fbfeff;border:2px dashed #dbe9f7;border-radius:16px;"
             "color:#aab6c4;")
         v.addWidget(self.lbl_thumb)
+        # 抠图方式：默认手动；本地 AI 只替换「框取 + 抠图」，后续标注完全共用
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        mode_row.addWidget(QLabel("抠图方式"))
+        self.rb_cut_manual = QRadioButton("手动框选")
+        self.rb_cut_ai = QRadioButton("本地 AI 抠图")
+        self.rb_cut_manual.setChecked(True)
+        ready, why = _local_ai_status()
+        self._local_ai_ready = ready
+        if not ready:
+            self.rb_cut_ai.setEnabled(False)
+            self.rb_cut_ai.setToolTip(why)
+        else:
+            self.rb_cut_ai.setToolTip(
+                "纯本地推理、不上传；首次使用会下载模型到 ~/.u2net，之后可离线")
+        for rb in (self.rb_cut_manual, self.rb_cut_ai):
+            rb.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            rb.toggled.connect(self._sync_cut_mode)
+            mode_row.addWidget(rb)
+        mode_row.addStretch(1)
+        v.addLayout(mode_row)
         right.addWidget(g_img)
 
         # 输出参数搬进齿轮「设置」，主界面右侧只留步骤与选项
@@ -3442,6 +3474,7 @@ class LaunchUI(QWidget):
         self.btn_start.setObjectName("primary")
         self.btn_start.setMinimumHeight(36)
         self.btn_start.clicked.connect(self._start)
+        self._sync_cut_mode()
 
         self.ck_launch = CuteCheckBox("生成后启动桌宠")
         self.ck_launch.setChecked(True)
@@ -5076,6 +5109,8 @@ class LaunchUI(QWidget):
         """跑任务时禁用按钮；抠图完成后才放开选做步骤与生成。"""
         cut = self._cut is not None
         self.btn_start.setEnabled(not busy)
+        self.rb_cut_manual.setEnabled(not busy)
+        self.rb_cut_ai.setEnabled(not busy and getattr(self, "_local_ai_ready", False))
         for b in (self.btn_eyes, self.btn_sway):
             b.setEnabled(not busy and cut)
         self.btn_table.setEnabled(not busy and cut)
@@ -5099,12 +5134,130 @@ class LaunchUI(QWidget):
                 800, lambda: None if self._progress_running else p.setVisible(False))
 
     def _start(self):
-        """第一步（必做）：框取手办并抠图，结果直接显示在画布上。"""
+        """第一步（必做）：手动框取或本地 AI 抠图，结果都落到同一份剪切结果。"""
         if not self._image_path:
             self._log("[提示] 请先选择图片")
             return
         self.log.clear()
-        self._run_task(self._cut_flow)
+        self._run_task(self._ai_cut_flow if self.rb_cut_ai.isChecked()
+                       else self._cut_flow)
+
+    def _sync_cut_mode(self, *_):
+        """切换抠图方式：只改主按钮文案，不动后续标注流程。"""
+        if not hasattr(self, "btn_start"):
+            return
+        if self.rb_cut_ai.isChecked():
+            self.btn_start.setText("开始处理（本地 AI 抠图，不上传）")
+            self.btn_start.setToolTip(
+                "整图本地分割，结果仍需人工确认；失败自动回手动框选")
+        else:
+            self.btn_start.setText("开始处理（框取手办并抠图）")
+            self.btn_start.setToolTip("框取手办并抠图")
+
+    def _run_matting(self, provider, request, config):
+        """后台线程跑一次本地推理；UI 线程只等结果，进度条继续动画。"""
+        from PyQt6.QtCore import Qt as _Qt
+
+        from ai_generate_contract import AIGenError
+        from ai_generate_worker import MattingWorker
+
+        loop = QEventLoop()
+        box: dict = {"cands": None, "error": None}
+
+        def _ok(cands):
+            box["cands"] = cands
+            if loop.isRunning():
+                loop.quit()
+
+        def _fail(msg):
+            box["error"] = msg
+            if loop.isRunning():
+                loop.quit()
+
+        worker = MattingWorker(provider, request, config, self)
+        # 队列连接：信号只在 UI 事件循环里处理，不会丢在 exec() 之前
+        worker.prepared.connect(_ok, type=_Qt.ConnectionType.QueuedConnection)
+        worker.failed.connect(_fail, type=_Qt.ConnectionType.QueuedConnection)
+        worker.start()
+        loop.exec()
+        worker.wait()
+        if box["error"]:
+            raise AIGenError(box["error"])
+        return box["cands"] or []
+
+    def _ai_cut_flow(self):
+        """本地 AI 抠图：整图 → soft alpha → 同一份 self._cut，后续完全共用。"""
+        from ai_generate_contract import (AIGenError, AIGenRequest,
+                                          load_config)
+        from ai_generate_provider import LocalMattingProvider
+
+        path = self._image_path
+        sku = launch.safe_stem(self.ed_sku.text().strip() or "custom")
+        stem = launch.safe_stem(self.ed_name.text().strip()
+                                or (Path(path).stem + "_pet"))
+        source_dir = DEFAULT_CANON / sku
+        out_dir = DEFAULT_OUT / sku
+        source_dir.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        self._out_dir = out_dir
+        self.btn_build.setToolTip("保存素材并启动桌宠（PNG / WebP / manifest）")
+
+        self._step("第 1 步 · 读图")
+        print(f"[AI 1/3] 读图 {Path(path).name}")
+        im = Image.open(path)
+        rgba = np.array(self._rotated_rgba(im))
+        rgb = rgba[..., :3].copy()
+        has_alpha = int(rgba[..., 3].min()) < 250
+        self.canvas.set_image(rgb)
+
+        cfg = load_config()
+        if not cfg.enabled or cfg.transport != "local":
+            self._log("[AI] 未启用本地模式：ai_generate.json 需 enabled=true、"
+                      "transport=local；已回手动框选")
+            self.rb_cut_manual.setChecked(True)
+            return
+
+        if has_alpha:
+            print("[AI 2/3] 原图自带 alpha，直接用透明通道")
+            alpha = rgba[..., 3].astype(np.float32) / 255.0
+        else:
+            self._step("第 2 步 · 本地 AI 抠图…",
+                       "首次加载模型可能较慢；图片不上传")
+            print("[AI 2/3] 本地分割（不上传）")
+            request = AIGenRequest(sku=sku, stem=stem,
+                                   image_bytes=Path(path).read_bytes(),
+                                   width=rgb.shape[1], height=rgb.shape[0])
+            try:
+                cands = self._run_matting(
+                    LocalMattingProvider(cfg.model or None), request, cfg)
+            except AIGenError as exc:
+                self._log(f"[AI] {exc}；已回手动框选")
+                self.rb_cut_manual.setChecked(True)
+                return
+            alpha = np.maximum.reduce([c.alpha for c in cands])
+
+        mask = (alpha > 0.5).astype(np.uint8)
+        if mask.mean() <= 0:
+            self._log("[AI] 结果全透明；已回手动框选")
+            self.rb_cut_manual.setChecked(True)
+            return
+
+        h, w = rgb.shape[:2]
+        self._cut = {"path": path, "sku": sku, "stem": stem,
+                     "source_dir": source_dir, "out_dir": out_dir,
+                     "rgb": rgb, "rgba": rgba, "has_alpha": has_alpha,
+                     "box": (0, 0, w, h), "mask": mask, "pts": [],
+                     "cache": {}, "sockets": [], "levels": [],
+                     "hair": [], "cloth": []}
+        self._hl_mask = None
+        self._sync_sway_table()
+        self._save_source()
+        self._show_cutout(show_mask=True, show_board=True)
+        act = self._run_preview(self._frames_cut(), "AI 抠图结果预览",
+                                back=None, ok="保存 (s)", sharpen=True)
+        if act != "ok":
+            raise Cancelled()
+        self._save_source()
 
     def _require(self, value):
         if value is None:

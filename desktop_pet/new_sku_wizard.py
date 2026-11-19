@@ -52,8 +52,14 @@ class NewSkuWizard(QDialog):
         self.setWindowTitle("新建 SKU")
         self.resize(900, 680)
         self._assets_root = assets_root
-        self._provider = provider or HttpAIProvider()
         self._config = config or load_config()
+        if provider is None:
+            if self._config.transport == "local":
+                from ai_generate_provider import LocalMattingProvider
+                provider = LocalMattingProvider(self._config.model or None)
+            else:
+                provider = HttpAIProvider()
+        self._provider = provider
         self._image_path: Path | None = None
         self._rgb: np.ndarray | None = None
         self._candidates: list = []
@@ -138,11 +144,17 @@ class NewSkuWizard(QDialog):
 
     def _sync_mode(self):
         ai = self.rb_ai.isChecked()
-        for w in (self.btn_pick, self.btn_generate, self.btn_reject, self.ck_consent):
+        local = self._config.transport == "local"
+        for w in (self.btn_pick, self.btn_generate, self.btn_reject):
             w.setEnabled(ai)
+        self.ck_consent.setEnabled(ai and not local)
+        self.ck_consent.setText(
+            "本地推理：不上传原图（首次会下载模型）" if local
+            else "允许上传原图（仅在本次请求中发送图片字节，"
+                 "不发路径 / key / 日志）")
         self.btn_commit.setEnabled(ai)
         self.lb_mode.setText(
-            "AI 生成：一次请求出全部候选，逐项人工确认后才落盘；失败整体回手动。"
+            "本地 AI 生成：一次请求出全部候选，逐项人工确认后才落盘；失败整体回手动。"
             if ai else
             "手动切割：沿用主窗口现有切割流程；本向导不复制切割逻辑。")
 
@@ -165,7 +177,7 @@ class NewSkuWizard(QDialog):
         if self._image_path is None or self._rgb is None:
             QMessageBox.information(self, "AI 生成", "请先选择原图")
             return
-        if not self.ck_consent.isChecked():
+        if self._config.transport != "local" and not self.ck_consent.isChecked():
             QMessageBox.warning(self, "AI 生成",
                                 "上传默认关闭：请显式勾选「允许上传原图」后再生成候选")
             return
@@ -238,7 +250,8 @@ class NewSkuWizard(QDialog):
             changeset = build_changeset(
                 sku=sku, stem=stem, rgb=self._rgb, selected=selected,
                 provider=str(getattr(self._provider, "name", "")),
-                uploaded=self.ck_consent.isChecked())
+                uploaded=(self.ck_consent.isChecked()
+                          and self._config.transport != "local"))
             result = commit_selected(info, changeset)
         except AIGenError as exc:
             QMessageBox.warning(self, "写入失败 · 已回手动", f"{exc}\n\n未留下半份 SKU。")

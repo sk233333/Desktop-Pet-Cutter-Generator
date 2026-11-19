@@ -29,9 +29,15 @@ class AIGenError(RuntimeError):
 
 @dataclass(frozen=True)
 class AIGenConfig:
-    """配置期 AI 候选的唯一真源；不写死 host / 模型 / key。"""
+    """配置期 AI 候选的唯一真源；不写死 host / 模型 / key。
+
+    ``transport`` 区分两种拓扑：
+    - ``local``：进程内本地分割，零网络，不需要上传授权与 key；
+    - ``remote``：远端服务，必须显式开启上传并配置 key。
+    """
 
     enabled: bool = False
+    transport: str = "remote"          # "local" | "remote"
     provider: str = ""
     base_url: str = ""
     model: str = ""
@@ -90,6 +96,8 @@ def load_config(path=None) -> AIGenConfig:
 
     return AIGenConfig(
         enabled=bool(data.get("enabled", False)),
+        transport="local" if str(data.get("transport") or "").lower() == "local"
+        else "remote",
         provider=str(data.get("provider") or ""),
         base_url=str(data.get("base_url") or ""),
         model=str(data.get("model") or ""),
@@ -108,6 +116,9 @@ def validate_config(cfg: AIGenConfig, env=None) -> list[str]:
     if not cfg.enabled:
         return ["enabled=false：只走手动切割（零网络）"]
     issues: list[str] = []
+    if cfg.transport == "local":
+        # 本地推理：不上传、不读 key；模型名可空（provider 用默认模型）
+        return issues
     if not cfg.base_url.strip():
         issues.append("缺 base_url")
     if not cfg.model.strip():
