@@ -23,8 +23,9 @@ if str(ROOT / "desktop_pet") not in sys.path:
 
 from ai_generate_contract import (AIGenCandidate, AIGenConfig,  # noqa: E402
                                   AIGenError, AIGenRequest, load_config,
-                                  propose_candidates)
-from ai_generate_provider import FakeProvider, HttpAIProvider   # noqa: E402
+                                  propose_candidates, validate_config)
+from ai_generate_provider import (FakeProvider, HttpAIProvider,  # noqa: E402
+                                  LocalMattingProvider)
 
 BASE_COMMIT = "7531ff3"
 TAG_COMMIT = "b03cdb7"          # tag v0.1 不得移动
@@ -92,6 +93,7 @@ def test_aig_example_has_no_model_id_host_or_key():
         encoding="utf-8")
     data = json.loads(text)
     assert data["enabled"] is False
+    assert data["transport"] == "remote"
     assert data["upload_consent"] is False
     assert data["thinking"] is False
     assert data["key_env"] == "DESKTOP_PET_AI_GENERATE_KEY"
@@ -130,10 +132,34 @@ def test_aig_invalid_candidates_are_skipped(monkeypatch):
         propose_candidates(fake_all_bad, _req((w, h)), _cfg())
 
 
+def test_aig_local_transport_no_consent_or_key(tmp_path):
+    cfg_path = tmp_path / "ai_generate.json"
+    cfg_path.write_text(json.dumps({"enabled": True, "transport": "local"}),
+                        encoding="utf-8")
+    cfg = load_config(cfg_path)
+    assert cfg.transport == "local"
+    assert validate_config(cfg, env={}) == []
+    fake = FakeProvider()
+    out = propose_candidates(fake, _req((8, 8)), cfg, env={})
+    assert [c.id for c in out] == ["fake-1"]
+
+
+def test_aig_local_provider_missing_dependency(monkeypatch):
+    monkeypatch.setitem(sys.modules, "rembg", None)
+    cfg = AIGenConfig(enabled=True, transport="local")
+    with pytest.raises(AIGenError) as ei:
+        LocalMattingProvider().propose(_req(), cfg)
+    assert "rembg" in str(ei.value)
+
+
+def test_aig_local_provider_rejects_remote_config():
+    with pytest.raises(AIGenError):
+        LocalMattingProvider().propose(_req(), AIGenConfig(enabled=True))
+
+
 class _Resp:
     def __init__(self, body: bytes):
         self._body = body
-
     def read(self):
         return self._body
 
@@ -207,6 +233,7 @@ def test_aig_no_weights_no_new_deps():
     allowed = {
         "__future__", "ast", "base64", "json", "os", "urllib", "pathlib",
         "dataclasses", "datetime", "re", "sys", "numpy", "cv2", "PIL",
+        "rembg",                     # 本地可选依赖：惰性导入，CI 不装
         "ai_generate_contract", "ai_generate_provider", "upgrade_core",
         "completers",
     }
