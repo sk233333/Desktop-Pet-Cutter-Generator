@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -203,6 +204,31 @@ def test_b4_speaking_frames_are_precomputed(tmp_path):
             w._pick_frame()
         for level in ("closed", "smile", "o"):
             assert level in w._mouth_frames
+    finally:
+        w.close()
+
+
+def test_mcp_notify_lands_only_on_arbiter(tmp_path):
+    """外部通知只写 arbiter 的 bubble/expr；源帧逐比特不变，点一下可收起。"""
+    _, asset, item, _ = make_sku(tmp_path, mouth=False)
+    w = win(asset, item)
+    try:
+        before = w._render_rgba.copy()
+        ev, box = threading.Event(), {}
+        w._on_mcp_event({"text": "构建过了", "emotion": "surprise",
+                         "mood_hint": None, "done": ev, "box": box})
+        assert ev.is_set() and box["ok"] is True
+        assert np.array_equal(w._render_rgba, before)
+        assert w.arbiter.resolve()["bubble"] == "构建过了"
+        assert w.arbiter.resolve()["expr"] == "surprise"
+
+        w._update_state(time.monotonic() * 1000.0)
+        assert w._bubble_lbl is not None
+        assert w._bubble_lbl.text() == "构建过了"
+        assert not w._bubble_lbl.isHidden()
+
+        w._ack_bubble()
+        assert w._bubble_lbl.isHidden()
     finally:
         w.close()
 
