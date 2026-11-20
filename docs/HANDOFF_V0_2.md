@@ -169,8 +169,8 @@ git push origin main          # 唯一一次
 | 补 1~补 6 并入 `HANDOFF_AI_MOTION.md` §8 | ✅ |
 | W0 三处收口 + 3 个本地 commit | ✅ |
 | W1 向导 AI 抠图 fake 端到端 | ✅（真实 rembg 下载受限，登记环境限制） |
-| W2 文本引导切割（API 实验入口） | ✅ 默认关、勾选即同意上传、失败回手动；模型框只是候选，切割预览里人工确认后才保存；本地 GroundingDINO/SAM2 权重路线未接线，4 张真实素材评测因 A 档未到登记未标定 |
-| W2 上传通道 | 文本引导用独立的 `ai_motion.json` 同意开关；W1 remote 用 `ai_generate.json` 的 `upload_consent`；两者不合并 |
+| W2 文本引导切割（API 实验入口） | ❌ 已删除（2026-11-20）：主界面 AI 切割 / 文本引导 / 贴内层黑边一并移除，`ai_cut_box.py` 与 `test_ai_cut_box.py` 删除；手动框选 + 补点保留 |
+| W2 上传通道 | 主界面不再有切割上传通道；W1 remote 仍用 `ai_generate.json` 的 `upload_consent` |
 | W3 AI 自动标注（只读报告） | ✅ `ai_annotate.py` + 「AI 标注报告…」按钮；不写 manifest、不改 schema、不自动判真眼 |
 | W4 更多表情 / 动作 | ⛔ 语义红线：`angry/sad/shy` 不注册 STATES，映射到哪个已有状态属产品决策；B-4 说话驱动嘴型另需切档语义 |
 | W5~W7 | 未开始（随 W4 语义红线停止） |
@@ -194,5 +194,5 @@ git push origin main          # 唯一一次
   把它们映射到已有状态（如 angry→surprise、sad→half、shy→smile）会改变
   生产行为语义；B-4 说话驱动嘴型还需要嘴型切档的产品口径。按 §7 停下，
   待拍板后再做，不擅自定映射。
-- W2 的本地 GroundingDINO/SAM2 权重路线未接线；当前交付为 API 文本引导
-  实验入口，默认关、勾选即同意上传；4 张真实素材评测因 A 档未到登记未标定。
+- W2 的本地 GroundingDINO/SAM2 权重路线未接线；主界面 AI 切割与文本引导
+  已于 2026-11-20 按用户决定删除，向导 AI 抠图与 AI 标注报告保留。

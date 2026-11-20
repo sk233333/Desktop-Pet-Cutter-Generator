@@ -172,8 +172,7 @@ thinking: false
 | `desktop_pet/ai_generate_worker.py` | 本地推理 QThread；UI 线程只等结果，不冻结 |
 | `desktop_pet/ai_generate_adapter.py` | soft alpha → base RGBA + 独立预览 PNG + `items[].ai_provenance`；`commit_selected()` 委托 `upgrade_core.commit_changes()` |
 | `desktop_pet/new_sku_wizard.py` | 新建 SKU：手动切割（默认）/ AI 生成；按 transport 选 provider；候选默认不选；整体否决；失败回手动 |
-| `desktop_pet/ui_app.py` | 图片组「抠图方式：手动框选（默认）/ AI 识别抠图」；AI 走 `ai_motion.json` 的视觉模型，只替换框取，像素掩膜仍由本地 GrabCut/SAM 完成；之后同一份 `self._cut`；新增「新建 SKU…」入口 |
-| `desktop_pet/ai_cut_box.py` | 视觉模型请求 / 归一化框解析 / 像素框与留边；图片缩到最长边 1024 再发，不打印图片内容 |
+| `desktop_pet/ui_app.py` | 图片组只保留「手动框选」；主界面 AI 切割已于 2026-11-20 移除。新增「新建 SKU…」入口 |
 | `desktop_pet/upgrade_core.py` | 仅加「manifest 不存在但内存有 v2 骨架」的 fallback + 失败时清理本次新建空目录；写盘路径仍唯一 |
 | `tests/test_ai_generate.py` / `tests/test_ai_generate_adapter.py` | `test_aig_*`，fake provider / 注入 opener，真实 API 不进 CI |
 

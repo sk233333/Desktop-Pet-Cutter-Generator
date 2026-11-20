@@ -2,6 +2,19 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## 移除主界面 AI 切割（本地未 push）
+
+### 行为变更
+
+- 主界面图片组只保留「手动框选」；「AI 切割（框手动）」「贴内层黑边」
+  「文本引导（会上传图片）」三个控件及 `_ai_cut_flow` / `_AICutPromptDialog`
+  / `_sync_cut_mode` / `_cut_flow(auto_seg=True)` 一并删除。
+- `desktop_pet/ai_cut_box.py` 与 `tests/test_ai_cut_box.py` 删除；文本引导
+  隐私测试同时移除。手动框选、补点、剪切预览与 `launch.save_cut_source()`
+  落盘路径不变。
+- 保留：向导 AI 抠图（`ai_generate.json`）、「AI 标注报告…」（只读）、
+  齿轮旁 AI 模型接口与「AI 生成参数…」（`ai_motion.json`）。
+
 ## AI 生成动作参数 / 表情（本地未 push）
 
 ### 行为变更
