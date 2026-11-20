@@ -159,6 +159,8 @@ printf '{"id":1,"method":"tools/list"}\n' \
 - `stdout` 只有协议行；`[manifest]` / `[mcp]` 等日志全在 `stderr`；
 - 无监听端口、无 socket；协议层无第三方依赖，干净 venv 五包可收集；
 - 方向差异未在本机验证（TRAE 本地未接入），只确认消息体与方向无关。
+- 进程级真实启动 / stdout 纯净 / 无监听端口 / UI 未执行的完整记录见
+  `docs/HANDOFF_TRAE_MCP_SMOKE.md`。
 
 ## 10. 状态
 
