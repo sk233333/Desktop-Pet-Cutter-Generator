@@ -172,9 +172,11 @@ git push origin main          # 唯一一次
 | W2 文本引导切割（API 实验入口） | ❌ 已删除（2026-11-20）：主界面 AI 切割 / 文本引导 / 贴内层黑边一并移除，`ai_cut_box.py` 与 `test_ai_cut_box.py` 删除；手动框选 + 补点保留 |
 | W2 上传通道 | 主界面不再有切割上传通道；W1 remote 仍用 `ai_generate.json` 的 `upload_consent` |
 | W3 AI 自动标注（只读报告） | ✅ `ai_annotate.py` + 「AI 标注报告…」按钮；不写 manifest、不改 schema、不自动判真眼 |
-| W4 更多表情 / 动作 | ⛔ 语义红线：`angry/sad/shy` 不注册 STATES，映射到哪个已有状态属产品决策；B-4 说话驱动嘴型另需切档语义 |
-| W5~W7 | 未开始（随 W4 语义红线停止） |
-| W8 Go/No-Go → push → v0.2 | 未开始（未 push、未打 v0.2） |
+| W4 更多表情 / 动作 | ✅ 封闭覆盖层键扩到 joy / sleepy / angry / sad / shy；基态绑定 smile→(joy,shy)、half→(sleepy,sad)、surprise→angry；STATES / 词表不变；B-4 嘴型与整帧重绘单列子轮 |
+| W5 切割质检 | ✅ `cut_quality.py` 只读打分（白边/阴影/软边/覆盖率/毛刺）+ 主界面「切割质检…」+ `--batch-report`；不自动重切 |
+| W6 memory + 独立 Agent | ✅ `memory_store.py`（显式触发、原子写、0600、sku 守卫、不喂词表）+ `agent_bridge.py`（JSONL/stdio，触发源不是状态源） |
+| W7 对话语音 | ⚠ TTS 接线、ASR 仅函数；`mood_hint` 接覆盖层取图；ASR UI 与说话驱动嘴型留独立轮 |
+| W8 Go/No-Go → push → v0.2 | ⬜ 本地验证已跑；push / tag 等人工核查后再执行 |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
 
 ### 8.1 W0~W2 收口实测
@@ -194,5 +196,15 @@ git push origin main          # 唯一一次
   把它们映射到已有状态（如 angry→surprise、sad→half、shy→smile）会改变
   生产行为语义；B-4 说话驱动嘴型还需要嘴型切档的产品口径。按 §7 停下，
   待拍板后再做，不擅自定映射。
+- W4 口径已定并落地：`angry→surprise`、`sad→half`、`shy→smile` 只做
+  渲染层取图；同基态多张按固定顺序（joy 先于 shy、sleepy 先于 sad），
+  `mood_hint` 命中且有素材时优先。`angry/sad` 由 adapter 补眉毛，
+  `STATES` / `expr_state.py` / 别名表零改动；B-4 与整帧重绘未做。
+- W5 质检只读：`score_cut()` / `batch_report()` 不写素材、不覆盖人工选择；
+  主界面按钮与 `--batch-report` 共用同一套打分。
+- W6/W7 已接线：memory 只由显式触发词写入，注入 system prompt 但不进
+  `derive_allowed()`；Agent 走 `agent_stdio` 子进程，输出仍统一走
+  `arbiter.request("interaction", ...)`；TTS 接在回复气泡后、默认关，
+  ASR 只有函数与配置，UI 入口留独立轮。
 - W2 的本地 GroundingDINO/SAM2 权重路线未接线；主界面 AI 切割与文本引导
   已于 2026-11-20 按用户决定删除，向导 AI 抠图与 AI 标注报告保留。

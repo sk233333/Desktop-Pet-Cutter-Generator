@@ -2,6 +2,32 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## W4~W7（本地未 push）
+
+### 行为变更
+
+- **W4 更多表情**：封闭覆盖层键扩到 `joy / sleepy / angry / sad / shy`；
+  基态绑定固定为 `smile→(joy, shy)`、`half→(sleepy, sad)`、
+  `surprise→angry`，同基态多张按元组顺序取第一张。`mood_hint` 命中且
+  该 SKU 有对应覆盖层时优先取它，但仍不改状态名。`STATES` 与
+  `derive_allowed()` 不变；`angry/sad` 补一道眉毛，参数全 0 也有可见像素。
+- **W4 边界**：B-4 说话驱动嘴型、整帧重绘 + 中间帧不在本轮，单列子轮。
+- **W6 按 SKU memory + 独立 Agent**：新增 `memory_store.py`
+  （`~/.config/desktop_pet/memory/<sku>.json`、显式触发词、tmp +
+  `os.replace`、0600、sku 守卫、同 SKU warn 去重、不喂 `derive_allowed()`）
+  与 `agent_bridge.py`（JSONL/stdio 窄协议，Agent 只做触发源）。
+  `agent.json` 新增 `agent` 段；`provider.surface=agent_stdio` 时
+  `stream_chat()` 走子进程，回复仍是同一套 parse / clamp /
+  `arbiter.request("interaction", ...)`。
+- **W7 对话语义与语音**：回复新增可选 `mood_hint`（封闭键）与 `remember`
+  （显式要求记住时写入 memory）；system prompt 注入结构化记忆短句。
+  新增 `voice_io.py`：TTS 接在回复气泡后，默认关；ASR 仅提供函数，
+  UI 入口留独立轮。TTS/ASR 都只调外部命令，无新依赖、不进 CI 五包。
+- **W5 切割质检**：新增 `cut_quality.py`（白边 / 阴影 / 软边 / 覆盖率 /
+  毛刺打分）、主界面「切割质检…」只读弹窗，以及
+  `launch.py --batch-report DIR [--report-out FILE] [--recursive]`
+  批量只读报告。打分不覆盖人工选择，不自动重切。
+
 ## 移除主界面 AI 切割（本地未 push）
 
 ### 行为变更

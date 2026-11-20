@@ -45,8 +45,12 @@ AI 只给**几何参数**，不自由发明状态名。表情首期只开放 `jo
 | `ai_motion_provider.py` | `FakeMotionProvider`（测试）/ `HttpMotionProvider`（urllib，无重试） |
 | `ai_motion_adapter.py` | 提案 → ChangeSet；覆盖层 PNG + `items[].expr_overlays`；不写盘 |
 | `expr_state.py` | 零字节保护（`7531ff3`）；不新增 STATES |
-| `pet_window.py` | `_load_expr_overlays()` + `_expr_frame()`：`smile→joy` / `half→sleepy`；缺文件回退 |
-| `ui_app.py` | 齿轮旁 AI 模型接口按钮 / 弹窗、动作参数页入口、后台 QThread、勾选弹窗、写后同步画布 |
+| `pet_window.py` | `_load_expr_overlays()` + `_expr_frame()`：`smile→(joy,shy)` / `half→(sleepy,sad)` / `surprise→angry`；缺文件回退 |
+| `ui_app.py` | 齿轮旁 AI 模型接口按钮 / 弹窗、动作参数页入口、后台 QThread、勾选弹窗、写后同步画布、切割质检 |
+| `memory_store.py` | 按 SKU 长期记忆：显式触发、原子写、0600、sku 守卫 |
+| `agent_bridge.py` | 独立 Agent 的 JSONL/stdio 窄协议；触发源，不做状态源 |
+| `voice_io.py` | 可选 TTS / ASR 外部命令；默认关、无新依赖 |
+| `cut_quality.py` | 只读切割质检：白边 / 阴影 / 软边 / 覆盖率 / 毛刺 |
 
 ## 4. 数据格式（不升 schema）
 
@@ -142,17 +146,18 @@ JSON 对象；勾选项为空；覆盖层渲染为空（缺眼睛标注）；写
 - `docs/HANDOFF_AI_GENERATE.md` 保持：默认手动、AI 只出候选、同一闸门、
   上传默认关、权重不回仓、失败整体回手动、两条入口分层、基线 `7531ff3`。
 
-### 8.4 两条已定但未进代码的线
+### 8.4 两条已接线的边界
 
 - **独立 Agent**：独立进程 + 窄协议（JSONL / stdio）+ 桌宠侧薄 adapter；
   Agent 是触发源不是状态源，输出统一走 `arbiter.request("interaction", ...)`；
   不加 `"agent": 2`；不塞 Qt 主线程；崩了桌宠回 idle。
-  `mood_hint` / 模式化主动陪伴归这里。
+  `mood_hint` / 模式化主动陪伴归这里。已落地 `agent_bridge.py`，
+  `agent.json` 的 `agent` 段默认关闭。
 - **按 SKU memory**：`~/.config/desktop_pet/memory/<sku>.json`，用户层、
   gitignore、不走 `commit_changes()`；自己原子写 `tmp + os.replace`；
   显式触发词才写、结构化条目、不存聊天全文；sku 文件名过
   `^[A-Za-z0-9_-]+$` 守卫；warn 按 sku 去重；不喂 `derive_allowed()`；
-  同 SKU 多窗口共享是特性。
+  同 SKU 多窗口共享是特性。已落地 `memory_store.py`。
 
 ### 8.5 未来建议的约束括号
 
@@ -161,13 +166,16 @@ JSON 对象；勾选项为空；覆盖层渲染为空（缺眼睛标注）；写
    不删；权重 / CUDA 前提按 8.1-1。
 2. **AI 自动标注**：走四段式 propose + ChangeSet + validate_manifest；
    草案不自动写 STATES；面积前二疑似挂件靠人挡，不自动判真眼。
-3. **更多表情 / 整帧重绘**：`angry/sad/shy` 先做封闭候选；新增状态名 =
-   B-2 同款（动状态表 → 单独边界文档 + 显式授权），不按「加个表情」估工；
-   整帧重绘别和 PachiPakuGen / Anime2.5DRig 混。
-4. **切割质量增强**：Alpha matting / 自动重切保留「结果可否决」；打分不
-   自动覆盖人工选择。
-5. **对话与语音**：按 8.4 展开 Agent + memory；TTS/ASR 引新依赖，单独一轮、
-   默认关、不进 CI 五包。
+3. **更多表情 / 整帧重绘**：`angry/sad/shy` 已作为封闭覆盖层键落地
+   （`angry→surprise`、`sad→half`、`shy→smile`）；新增状态名仍是 B-2 同款
+   （动状态表 → 单独边界文档 + 显式授权）。整帧重绘 / 中间帧未做，
+   别和 PachiPakuGen / Anime2.5DRig 混。
+4. **切割质量增强**：只读质检已落地（`cut_quality.py`：白边 / 阴影 /
+   软边 / 覆盖率 / 毛刺）；自动重切保留「结果可否决」，打分不自动覆盖
+   人工选择。
+5. **对话与语音**：memory + Agent 已接线（`memory_store.py` /
+   `agent_bridge.py`）；TTS 默认关、ASR 只有函数；新依赖仍单独一轮、
+   不进 CI 五包。
 6. **工程增强**：多模型路由沿用 `key_env` 占位、零具体模型 ID；流式 / 重试
    默认关且「已吐字不再重试」；token/费用只打类别不打 URL/key；系统钥匙串
    可选，0600 文件 + 环境变量优先先保持。
