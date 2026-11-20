@@ -43,7 +43,10 @@ ANIM_DEFAULTS = {
     "plat": 0.6,
 }
 
-EXPRESSION_STATES = ("joy", "sleepy")
+# 封闭覆盖层键：都不是 STATES，只决定渲染取哪张覆盖层。
+# 基态绑定：joy→smile、sleepy→half、angry→surprise、sad→half、shy→smile；
+# 同基态多张时按 PetWindow 的固定优先级取第一张（详见 pet_window）。
+EXPRESSION_STATES = ("joy", "sleepy", "angry", "sad", "shy")
 
 
 class AIGenError(RuntimeError):
@@ -240,7 +243,7 @@ def _sway_list(raw, current, count: int) -> list[dict]:
 
 
 def _clamp_expressions(raw) -> dict:
-    """只接受封闭的 joy / sleepy；渲染参数复用 smile_geometry 的同一区间。"""
+    """只接受封闭的覆盖层键；渲染参数复用 smile_geometry 的同一区间。"""
     if not isinstance(raw, dict):
         return {}
     from completers.smile_geometry import _sanitize
@@ -283,7 +286,7 @@ def parse_proposal(raw, request: AIMotionRequest) -> AIMotionProposal:
             warnings.append("已忽略未开放的表情状态：" + "、".join(map(str, unknown_expr)))
     expressions = _clamp_expressions(raw.get("expressions"))
     if not expressions:
-        warnings.append("AI 未给出 joy / sleepy，表情部分保持原样")
+        warnings.append("AI 未给出封闭表情键，表情部分保持原样")
 
     return AIMotionProposal(anim=anim, sway=sway, expressions=expressions,
                             warnings=warnings)
@@ -318,14 +321,16 @@ def parse_json_content(text: str) -> dict:
 _SYSTEM_PROMPT = """你是桌面宠物动作参数调参助手。只输出一个 JSON 对象，不要解释、不要 Markdown。
 对象结构必须严格为：
 {"anim": {九项}, "sway": {"hair": [逐区域], "cloth": [逐区域]},
- "expressions": {"joy": 参数, "sleepy": 参数}}
+ "expressions": {"joy": 参数, "sleepy": 参数, "angry": 参数, "sad": 参数, "shy": 参数}}
 anim 九项与范围：
 hair_speed 0~5, hair_amp 0~3, hair_stiff 0~3, hair_damp 0~3,
 sway_deg 0~8, sway_speed 0~3, bounce 0~1, fall 0~3, plat 0.1~20。
 sway 每项 {"amp": 0~3, "dir": 0~359 或 null, "bias": -45~45}。
-expressions 只允许 joy / sleepy；参数为
+expressions 只允许 joy / sleepy / angry / sad / shy；参数为
 {"lid_drop": 0~0.45, "lid_sag": 0~0.25, "arc_ratio": 0~1, "blush_alpha": 0~160}。
-joy = 开心（眯眼 + 嘴角弧 + 腮红），sleepy = 困倦（上眼睑压低、嘴角弧接近 0、少腮红）。
+joy = 开心（眯眼 + 嘴角弧 + 腮红），sleepy = 困倦（上眼睑压低、嘴角弧接近 0、少腮红），
+angry = 生气（眼睑压低、无嘴角弧），sad = 难过（眼睑下垂、少腮红），
+shy = 害羞（眯眼 + 嘴角弧 + 高腮红）。
 不要发明新的状态名，不要改 pivot / tip / mask 等几何字段。"""
 
 

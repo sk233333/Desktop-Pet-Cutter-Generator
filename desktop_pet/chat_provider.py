@@ -58,12 +58,15 @@ def _iter_sse(resp):
             yield obj
 
 
-def stream_chat(cfg: dict, sys_msg: str, messages: list[dict]):
+def stream_chat(cfg: dict, sys_msg: str, messages: list[dict], *,
+                sku: str = ""):
     """yield 增量文本 token；异常向上抛给 worker 统一降级。
 
     - `chat.enabled != true` 时直接抛错，保证关闭状态零网络；
     - `json_mode == "object"`：同时给 `response_format` 与 prompt 里的 json 字样；
     - 超时取 `chat.timeout_ms`；不重试。
+    - profile.surface == "agent_stdio" 时不走 HTTP，交给独立 Agent 子进程；
+      Agent 输出仍是一行 JSON，worker 照常 parse / clamp。
     """
     chat = cfg.get("chat") if isinstance(cfg, dict) else None
     chat = chat if isinstance(chat, dict) else {}
@@ -78,6 +81,16 @@ def stream_chat(cfg: dict, sys_msg: str, messages: list[dict]):
     profile = profiles.get(cfg.get("provider") or "") or {}
     profile = profile if isinstance(profile, dict) else {}
     surface = str(profile.get("surface") or "openai_chat")
+    if surface == "agent_stdio":
+        try:
+            from . import agent_bridge
+        except ImportError:
+            import agent_bridge
+        reply = agent_bridge.respond(cfg, {
+            "sku": sku or "", "system": sys_msg, "messages": list(messages),
+        })
+        yield json.dumps(reply, ensure_ascii=False)
+        return
     if surface != "openai_chat":
         raise ValueError(f"暂不支持的 provider surface：{surface}")
 

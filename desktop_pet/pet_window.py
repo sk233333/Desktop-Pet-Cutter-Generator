@@ -75,6 +75,15 @@ except ImportError:  # 直接以脚本方式运行
     from mouth_overlay import (MouthOverlay, match_items, mouth_name,
                                warn_files_fallback)
 
+# 封闭覆盖层键 → 基态绑定；同一基态多张时按元组顺序取第一张。
+# 这些键都不是 STATES，只用于渲染取图，不进 derive_allowed()。
+_OVERLAY_FOR_STATE = {
+    "smile": ("joy", "shy"),
+    "half": ("sleepy", "sad"),
+    "surprise": ("angry",),
+}
+_OVERLAY_KEYS = frozenset(k for keys in _OVERLAY_FOR_STATE.values() for k in keys)
+
 
 class _ExprPort:
     """ActionBridge 的 sm 端口：把 `.set()` 转成 arbiter.request()。
@@ -289,6 +298,7 @@ class PetWindow(QWidget):
         self._chat_streaming = False
         self._chat_buf = ""
         self._chat_bubble_text = ""
+        self._overlay_hint = None      # 语义提示：只改取图，不改状态名
         if self.chat_enabled:
             try:
                 try:
@@ -614,6 +624,31 @@ class PetWindow(QWidget):
                 and (self.asset.expr_bank() is not None
                      or bool(self._expr_overlays)))
 
+    def _overlay_key_for(self, state: str) -> str:
+        """按基态绑定挑覆盖层键；同基态多张时按固定优先级取第一张。
+
+        覆盖层键不是 STATES，只决定取哪张图：joy/shy → smile，
+        sleepy/sad → half，angry → surprise。mood_hint 命中候选时优先，
+        但 hint 只改变取图，不改变请求的状态名。
+        """
+        candidates = _OVERLAY_FOR_STATE.get(state, ())
+        hint = getattr(self, "_overlay_hint", None)
+        if hint in candidates and hint in self._expr_overlays:
+            return hint
+        for key in candidates:
+            if key in self._expr_overlays:
+                return key
+        return state
+
+    def _set_overlay_hint(self, hint) -> None:
+        """记录语义提示（closed key）；换 hint 时作废表情帧缓存。"""
+        hint = hint if hint in _OVERLAY_KEYS else None
+        if hint == getattr(self, "_overlay_hint", None):
+            return
+        self._overlay_hint = hint
+        self._expr_rgba.clear()
+        self._expr_pixmaps.clear()
+
     def _expr_frame(self, state: str) -> tuple[np.ndarray, QPixmap]:
         """取该状态的显示尺寸帧；第一次用到才按显示高度重采样并缓存。
 
@@ -622,9 +657,9 @@ class PetWindow(QWidget):
         预览端（ui_app）仍是另一套，留到 T6 收。
         """
         if state not in self._expr_pixmaps:
-            # joy / sleepy 不注册 STATES，只挂到已有状态上：
-            # smile → joy 覆盖层，half → sleepy 覆盖层；有覆盖层时优先。
-            overlay_key = {"smile": "joy", "half": "sleepy"}.get(state, state)
+            # joy/sleepy/angry/sad/shy 不注册 STATES，只挂到已有状态上；
+            # 有覆盖层时优先，否则回退原状态贴片。
+            overlay_key = self._overlay_key_for(state)
             if state == "blink":
                 frames = self.raw_blink or self._blink_frames_from(self._render_rgba)
                 base = frames[-1] if frames else self._render_rgba
@@ -1245,10 +1280,16 @@ class PetWindow(QWidget):
         history = self._chat_history[-keep:] if keep else []
         messages = history + [{"role": "user", "content": text}]
         persona = (self._chat_cfg.get("skus") or {}).get(self.sku) or {}
+        try:
+            from .memory_store import load_memory, memory_lines
+        except ImportError:
+            from memory_store import load_memory, memory_lines
+        memories = memory_lines(load_memory(self.sku))
         self._chat_user_text = text
         self._chat_buf = ""
         self._chat_streaming = False
-        w = ChatWorker(self._chat_cfg, persona, self.chat_allowed, messages)
+        w = ChatWorker(self._chat_cfg, persona, self.chat_allowed, messages,
+                       sku=self.sku, memories=memories)
         w.chunk.connect(self._chat_on_chunk)
         w.done.connect(self._chat_on_done)
         w.failed.connect(self._chat_on_failed)
@@ -1269,6 +1310,7 @@ class PetWindow(QWidget):
         r = reply if isinstance(reply, dict) else {}
         text = str(r.get("text") or "")
         emotion = str(r.get("emotion") or "normal")
+        self._set_overlay_hint(r.get("mood_hint"))
         self.arbiter.request("interaction", "expr", emotion, 3000)
         if text:
             self.arbiter.request("interaction", "bubble", text, 6000)
@@ -1289,6 +1331,25 @@ class PetWindow(QWidget):
                 keep = 20
             if keep and len(self._chat_history) > keep:
                 self._chat_history = self._chat_history[-keep:]
+        remember = str(r.get("remember") or "").strip()
+        if remember:
+            try:
+                try:
+                    from .memory_store import append_memory
+                except ImportError:
+                    from memory_store import append_memory
+                append_memory(self.sku, remember)
+            except Exception:
+                pass
+        if text:
+            try:
+                try:
+                    from .voice_io import speak
+                except ImportError:
+                    from voice_io import speak
+                speak(self._chat_cfg, text)
+            except Exception:
+                pass
 
     def _chat_on_failed(self):
         self._chat_streaming = False

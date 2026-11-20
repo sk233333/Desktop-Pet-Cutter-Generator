@@ -79,7 +79,7 @@ SKIP = object()  # 用户在可选步骤按 s 跳过
 CLI_FLAGS = {
     "--image", "--box", "--points", "--eyes-boxes", "--no-points", "--no-eyes",
     "--no-preview", "--engine", "--device", "--sku", "--name", "--source-dir",
-    "--out-dir", "--size", "--height", "--no-launch",
+    "--out-dir", "--size", "--height", "--no-launch", "--batch-report",
 }
 CKPT = (Path(__file__).resolve().parent.parent
         / "Punctuation_selection_of_images" / "sam2.1_hiera_small.pt")
@@ -890,7 +890,24 @@ def main():
                     help="强制打开图形操作界面（不带任何参数时默认就是界面）")
     ap.add_argument("--cli", action="store_true",
                     help="强制走命令行多窗口流程（等价于带上 --image 等参数）")
+    ap.add_argument("--batch-report", default=None, metavar="DIR",
+                    help="只读批量质检：对文件夹内自带 alpha 的图打分并输出 JSON 报告")
+    ap.add_argument("--report-out", default=None, metavar="FILE",
+                    help="质检报告写到这里；不填则打印到 stdout")
+    ap.add_argument("--recursive", action="store_true",
+                    help="批量质检时递归子目录")
     args = ap.parse_args()
+
+    if args.batch_report:
+        from cut_quality import batch_report, format_report
+        report = batch_report(args.batch_report, recursive=args.recursive)
+        text = format_report(report)
+        if args.report_out:
+            Path(args.report_out).write_text(text, encoding="utf-8")
+            print(f"[质检] 已写入 {args.report_out}")
+        else:
+            print(text)
+        return
 
     given = {a.split("=", 1)[0] for a in sys.argv[1:] if a.startswith("--")}
     use_cli = args.cli or (not args.ui and bool(given & CLI_FLAGS))

@@ -16,6 +16,8 @@ from pathlib import Path
 MAX_TEXT = 30          # 气泡文本上限
 MAX_RAW_TEXT = 4000    # 解析前先挡住的异常长文本（正常回复远小于它）
 DEFAULT_REPLY = {"text": "…", "emotion": "normal", "action": "none"}
+# 语义提示只允许封闭覆盖层键；它只改变取图，不改变状态名 / 词表。
+MOOD_KEYS = ("joy", "sleepy", "angry", "sad", "shy")
 
 # effect_table.json 里「效果 id → 表情状态」的投影；derive_allowed 只看
 # effects.enabled 的 id，不读表本身（避免多一份运行时依赖）。
@@ -46,7 +48,7 @@ def _default_copy(default) -> dict | None:
     return None if default is None else dict(default)
 
 
-def build_system_prompt(persona: dict, allowed: dict) -> str:
+def build_system_prompt(persona: dict, allowed: dict, memories=None) -> str:
     """按运行时词表拼 system prompt；词表为空时只留 normal / none。"""
     p = persona if isinstance(persona, dict) else {}
     name = str(p.get("name") or "桌宠")
@@ -58,15 +60,25 @@ def build_system_prompt(persona: dict, allowed: dict) -> str:
         emos.insert(0, "normal")
     emotion_line = "、".join(emos)
     action_line = "、".join(acts) if acts else "（无可用动作，只能填 none）"
+    memory_block = ""
+    lines = [str(m).strip() for m in (memories or []) if str(m).strip()]
+    if lines:
+        memory_block = ("\n已知的长期记忆（用户显式要求记住，只作参考，"
+                        "不要复述原文）：\n" + "\n".join(f"- {m}" for m in lines)
+                        + "\n")
     return (
         f"你是{name}。{persona_text}\n"
         f"说话风格：{style}\n"
+        f"{memory_block}"
         "\n"
         "只输出严格 JSON（json），不要 markdown、不要解释、不要跳出角色：\n"
-        '{"text":"...","emotion":"...","action":"..."}\n'
+        '{"text":"...","emotion":"...","action":"...",'
+        '"mood_hint":"...","remember":"..."}\n'
         "\n"
         f"emotion 只能从以下值里选：{emotion_line}\n"
         f"action 只能从以下值里选：{action_line}，没有动作就填 \"none\"\n"
+        f"mood_hint 只能从以下值里选或省略：{'、'.join(MOOD_KEYS)}\n"
+        "remember 只在用户明确要求记住时填写，否则省略；不要写入聊天全文。\n"
         "你不会眨眼，眨眼由宠物自己控制；不要试图指挥眨眼。\n"
         "text 超过 30 字自行截断。\n"
     )
@@ -92,7 +104,14 @@ def safe_parse(raw: str, default=DEFAULT_REPLY) -> dict | None:
     action = obj.get("action")
     if not all(isinstance(v, str) for v in (text, emotion, action)):
         return _default_copy(default)
-    return {"text": text, "emotion": emotion, "action": action}
+    out = {"text": text, "emotion": emotion, "action": action}
+    hint = obj.get("mood_hint")
+    if hint in MOOD_KEYS:
+        out["mood_hint"] = hint
+    remember = obj.get("remember")
+    if isinstance(remember, str) and remember.strip():
+        out["remember"] = remember.strip()[:200]
+    return out
 
 
 _TEXT_KEY = re.compile(r'"text"\s*:\s*"')
@@ -146,7 +165,14 @@ def clamp(reply: dict, allowed: dict) -> dict:
         emotion = "normal"
     if action not in acts:
         action = "none"
-    return {"text": text[:MAX_TEXT], "emotion": emotion, "action": action}
+    out = {"text": text[:MAX_TEXT], "emotion": emotion, "action": action}
+    hint = r.get("mood_hint")
+    if hint in MOOD_KEYS:
+        out["mood_hint"] = hint
+    remember = r.get("remember")
+    if isinstance(remember, str) and remember.strip():
+        out["remember"] = remember.strip()[:200]
+    return out
 
 
 def _enabled_states(enabled: set[str]) -> set[str]:
@@ -208,7 +234,8 @@ def chat_enabled(cfg: dict) -> bool:
 def load_agent_config(path=None) -> dict:
     """读 `desktop_pet/agent.json`；缺失或损坏时返回「关闭」配置，不抛异常。"""
     p = Path(path) if path else Path(__file__).with_name("agent.json")
-    cfg = {"chat": dict(_DEFAULT_CHAT), "provider": "", "profiles": {}, "skus": {}}
+    cfg = {"chat": dict(_DEFAULT_CHAT), "provider": "", "profiles": {},
+           "skus": {}, "agent": {}, "voice": {}}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -225,7 +252,7 @@ def load_agent_config(path=None) -> dict:
     for key in ("provider",):
         if isinstance(data.get(key), str):
             cfg[key] = data[key]
-    for key in ("profiles", "skus"):
+    for key in ("profiles", "skus", "agent", "voice"):
         if isinstance(data.get(key), dict):
             cfg[key] = data[key]
     return cfg

@@ -28,5 +28,15 @@
       "action_allow": [],
       "mood_default": "calm"
     }
+  },
+  "agent": {
+    "enabled": false,
+    "command": "",
+    "timeout_ms": 8000
+  },
+  "voice": {
+    "enabled": false,
+    "tts": "",
+    "asr": ""
   }
 }

@@ -1058,7 +1058,7 @@ class _AIMotionDialog(QDialog):
                 grid.addWidget(cb, row, 0)
                 row += 1
         if proposal.expressions:
-            grid.addWidget(QLabel("<b>表情覆盖层（joy / sleepy）</b>"), row, 0)
+            grid.addWidget(QLabel("<b>表情覆盖层（joy / sleepy / angry / sad / shy）</b>"), row, 0)
             row += 1
             for state, params in proposal.expressions.items():
                 text = ", ".join(f"{k}={_fmt_num(v)}" for k, v in params.items())
@@ -4027,7 +4027,7 @@ class LaunchUI(QWidget):
         self.btn_ai_motion.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_ai_motion.setToolTip(
             "用独立 ai_motion.json 调用大模型，生成九项动作参数、逐区域摆动"
-            "与 joy/sleepy 表情；逐项勾选后才写入 manifest")
+            "与 joy/sleepy/angry/sad/shy 覆盖层；逐项勾选后才写入 manifest")
         self.btn_ai_motion.clicked.connect(self._open_ai_motion)
         ag.addWidget(self.btn_ai_motion, 9, 0, 1, 2)
         self.btn_ai_annotate = QPushButton("AI 标注报告…")
@@ -4037,6 +4037,12 @@ class LaunchUI(QWidget):
             "不写 manifest，真眼由人确认")
         self.btn_ai_annotate.clicked.connect(self._open_ai_annotate)
         ag.addWidget(self.btn_ai_annotate, 10, 0, 1, 2)
+        self.btn_quality = QPushButton("切割质检…")
+        self.btn_quality.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_quality.setToolTip(
+            "只读打分：白边 / 阴影 / 软边 / 覆盖率；不自动重切、不覆盖结果")
+        self.btn_quality.clicked.connect(self._open_cut_quality)
+        ag.addWidget(self.btn_quality, 11, 0, 1, 2)
         v.addWidget(g_anim)
 
         tip = QLabel("改完直接关掉即可：动作参数立刻作用在画布上的桌宠，"
@@ -5698,6 +5704,28 @@ class LaunchUI(QWidget):
             return
         self.log.clear()
         self._run_task(self._cut_flow)
+
+    def _open_cut_quality(self):
+        """只读质检：给当前切割结果打分，不改掩膜、不触发重切。"""
+        cut = getattr(self, "_cut", None)
+        if not cut:
+            self._log("[提示] 先完成切割，再运行质检")
+            return
+        from cut_quality import score_cut
+        got = score_cut(cut["rgb"], cut["mask"])
+        lines = [
+            f"评分：{got['score']}（{got['level']}）",
+            f"覆盖率：{got['coverage'] * 100:.1f}%",
+            f"白边：{got['white_halo'] * 100:.1f}%   "
+            f"阴影：{got['shadow'] * 100:.1f}%",
+            f"软边：{got['soft_ratio'] * 100:.1f}%   毛刺：{got['jagged']}",
+        ]
+        if got["notes"]:
+            lines.append("提示：" + "；".join(got["notes"]))
+        lines.append("只读报告：不会自动重切，也不会覆盖当前结果。")
+        self._log(f"[质检] {got['score']} 分（{got['level']}）"
+                  + ("；" + "；".join(got["notes"]) if got["notes"] else ""))
+        QMessageBox.information(self, "切割质检（只读）", "\n".join(lines))
 
     def _require(self, value):
         if value is None:

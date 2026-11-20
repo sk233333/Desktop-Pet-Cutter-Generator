@@ -286,12 +286,22 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 - 词表在窗口启动时从 `expr_state.STATES` + `ActionBridge.registry` +
   逐 SKU `effects.enabled` 反推一次，**不含 `blink`**；`smile` 已接线并进词表；
   改配置需重启生效。
-- 上下文只带最近 `history` 轮原文，不做滚动摘要。按 SKU 的长期记忆
-  （`~/.config/desktop_pet/memory/<sku>.json`）已定方案但尚未接线，
-  见 `docs/HANDOFF_AI_MOTION.md` §8.4；落地后再改本句。
+- 上下文只带最近 `history` 轮原文，不做滚动摘要。用户说「记住…」时写
+  `~/.config/desktop_pet/memory/<sku>.json`（原子写、0600、显式触发、
+  只存结构化短句）；下一轮对话把记忆作为参考注入 system prompt，
+  不进 `derive_allowed()`。
+- 独立 Agent：`agent.json` 的 `agent.enabled=true` 且
+  `profiles.<name>.surface=agent_stdio` 时，对话改走子进程 JSONL；
+  输出仍是 `text / emotion / action / mood_hint / remember`，
+  由 `arbiter.request("interaction", ...)` 统一消费。
+- `mood_hint` 只从封闭覆盖层键（joy / sleepy / angry / sad / shy）里选，
+  有对应素材时优先取图，不新增状态名。
 - 无 key / 断网 / 429 / 超时 / 乱码 → 静默回 idle，不弹错误气泡。
-- `mouth_dir` 已在桌面运行时消费；说话驱动、生成式候选、心跳、滚动摘要排 v0.1.1。
-- 测试：以 `pytest -q` 当前输出为准（A1 基线 133；嘴型集成测试需本地 PyQt6，
+- `mouth_dir` 已在桌面运行时消费；说话驱动嘴型（B-4）、生成式候选、
+  心跳、滚动摘要排 v0.1.1。
+- 语音默认关：`agent.json` 的 `voice.enabled=true` 且填了 `tts` / `asr`
+  命令才会调用；ASR 的 UI 入口留独立轮。
+- 测试：以 `pytest -q` 当前输出为准（嘴型集成测试需本地 PyQt6，
   CI 五包会 skip 该文件）。
 
 ### 跑起来（桌宠）

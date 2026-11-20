@@ -26,21 +26,26 @@ class ChatWorker(QThread):
     failed = pyqtSignal()        # 静默信号，不带错误文本
 
     def __init__(self, cfg: dict, persona: dict, allowed: dict,
-                 messages: list[dict], parent=None):
+                 messages: list[dict], parent=None, *, sku: str = "",
+                 memories=None):
         super().__init__(parent)
         self.cfg = cfg
         self.persona = persona or {}
         self.allowed = allowed or {}
         self.messages = list(messages or [])
+        self.sku = sku or ""
+        self.memories = list(memories or [])
 
     def run(self):
-        sys_msg = build_system_prompt(self.persona, self.allowed)
+        sys_msg = build_system_prompt(self.persona, self.allowed,
+                                      self.memories)
         emitted = False
         # 最多 1 次退避重试；已吐出片段后不再重试，避免气泡重复
         for attempt in range(2):
             buf: list[str] = []
             try:
-                for token in stream_chat(self.cfg, sys_msg, self.messages):
+                for token in stream_chat(self.cfg, sys_msg, self.messages,
+                                         sku=self.sku):
                     if self.isInterruptionRequested():
                         return
                     if not token:

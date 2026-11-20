@@ -79,20 +79,45 @@ def request_from_item(sku: str, stem: str, item: dict) -> AIMotionRequest:
     )
 
 
+def _draw_brows(canvas: np.ndarray, eyes: list[dict], width: int,
+                height: int, mode: str) -> None:
+    """在眼睑线上方补一道眉毛：angry 内低外高，sad 内高外低。"""
+    color = smile_geometry._color(eyes)
+    thick = 2 if max(width, height) >= 256 else 1
+    ex = sum(e["cx"] for e in eyes) / len(eyes)
+    for e in eyes:
+        inner = -1.0 if e["cx"] <= ex else 1.0
+        half = max(2.0, e["rx"] * 0.9)
+        cy = e["cy"] - e["ry"] * 1.55
+        dy = max(1.0, e["ry"] * 0.5)
+        y_in, y_out = ((cy + dy, cy - dy * 0.2) if mode == "angry"
+                       else (cy - dy * 0.2, cy + dy))
+        p1 = (int(round(min(max(e["cx"] + inner * half, 0), width - 1))),
+              int(round(min(max(y_in, 0), height - 1))))
+        p2 = (int(round(min(max(e["cx"] - inner * half, 0), width - 1))),
+              int(round(min(max(y_out, 0), height - 1))))
+        cv2.line(canvas, p1, p2, color, thick, cv2.LINE_AA)
+
+
 def _render_expression(item: dict, state: str, params: dict) -> np.ndarray:
-    """用 smile_geometry 的同一套几何画 joy / sleepy 覆盖层（RGBA uint8）。"""
+    """用 smile_geometry 的同一套几何画覆盖层（RGBA uint8）。
+
+    基态绑定只影响几何取景：joy/shy 允许嘴角弧、sleepy/angry/sad 不画弧；
+    angry/sad 额外补一道眉毛，保证参数全 0 时覆盖层也不为空。
+    """
     eyes = smile_geometry._pick_eyes(item)
     width = int(item.get("width") or 0)
     height = int(item.get("height") or 0)
     if not eyes or width <= 0 or height <= 0:
         raise AIGenError("素材缺少眼睛标注或尺寸，无法生成表情覆盖层")
-    # joy 允许嘴角弧（素材已有 mouth_dir 时与 smile 同规则：避免双嘴）；
-    # sleepy 不画嘴角弧，只压眼睑 + 少量腮红。
-    with_arc = state == "joy" and not bool(item.get("mouth_dir"))
+    # 素材已有 mouth_dir 时与 smile 同规则：不再画第二张嘴
+    with_arc = state in ("joy", "shy") and not bool(item.get("mouth_dir"))
     canvas = np.zeros((height, width, 4), np.uint8)
     smile_geometry._draw(canvas, eyes, width, height,
                          smile_geometry.DEFAULT_PRESET, with_arc=with_arc,
                          params=params)
+    if state in ("angry", "sad"):
+        _draw_brows(canvas, eyes, width, height, state)
     if not (canvas[..., 3] > 0).any():
         raise AIGenError(f"{state} 覆盖层为空（眼睛几何不可用）")
     return canvas
