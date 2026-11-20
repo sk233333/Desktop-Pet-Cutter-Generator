@@ -20,6 +20,48 @@ except ImportError:  # 直接以脚本 / 平铺 sys.path 运行时
     from chat_provider import stream_chat
 
 
+class SpeakWorker(QThread):
+    """TTS 外部命令放后台跑；只回报成功与否，不碰状态与气泡。"""
+
+    done = pyqtSignal(bool)
+
+    def __init__(self, cfg: dict, text: str, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self.text = text
+
+    def run(self):
+        try:
+            try:
+                from .voice_io import speak
+            except ImportError:
+                from voice_io import speak
+            self.done.emit(bool(speak(self.cfg, self.text)))
+        except Exception:
+            self.done.emit(False)
+
+
+class AsrWorker(QThread):
+    """ASR 外部命令后台线程；空结果用空串回报，由调用方回「没听清」。"""
+
+    done = pyqtSignal(str)
+
+    def __init__(self, cfg: dict, path: str, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self.path = path
+
+    def run(self):
+        try:
+            try:
+                from .voice_io import transcribe
+            except ImportError:
+                from voice_io import transcribe
+            self.done.emit(transcribe(self.cfg, self.path) or "")
+        except Exception:
+            self.done.emit("")
+
+
 class ChatWorker(QThread):
     chunk = pyqtSignal(str)      # 逐字 → 气泡 UI
     done = pyqtSignal(dict)      # clamp 后的 reply

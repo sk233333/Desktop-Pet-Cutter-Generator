@@ -47,8 +47,8 @@ import numpy as np
 from PyQt6.QtCore import QPoint, QPointF, QRect, Qt, QTimer
 from PyQt6.QtGui import (QCursor, QFont, QGuiApplication, QImage, QPainter,
                          QPixmap, QTransform)
-from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QInputDialog,
-                             QLabel, QMenu, QPushButton, QWidget)
+from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QGridLayout,
+                             QInputDialog, QLabel, QMenu, QPushButton, QWidget)
 
 try:
     from .anim import (HairField, PetAsset, blink_group_counts, blink_phases,
@@ -62,6 +62,8 @@ try:
     from .motion_cfg import load_motion, motion_cfg_path, save_motion
     from .mouth_overlay import (MouthOverlay, match_items, mouth_name,
                                 warn_files_fallback)
+    from .mouth_runtime import cycle_level, load_mouth_set, should_cycle
+    from .voice_io import asr_ready, tts_ready
 except ImportError:  # 直接以脚本方式运行
     from anim import (HairField, PetAsset, blink_group_counts, blink_phases,
                       compose_group_blink, eye_group_bbox, gaze_frame,
@@ -74,6 +76,8 @@ except ImportError:  # 直接以脚本方式运行
     from motion_cfg import load_motion, motion_cfg_path, save_motion
     from mouth_overlay import (MouthOverlay, match_items, mouth_name,
                                warn_files_fallback)
+    from mouth_runtime import cycle_level, load_mouth_set, should_cycle
+    from voice_io import asr_ready, tts_ready
 
 # 封闭覆盖层键 → 基态绑定；同一基态多张时按元组顺序取第一张。
 # 这些键都不是 STATES，只用于渲染取图，不进 derive_allowed()。
@@ -103,6 +107,14 @@ class _ExprPort:
 
 ROOT = Path(__file__).resolve().parent
 _MOUTH_WARNED: set[tuple] = set()
+# 语音线程没有可中断的外部子进程；关窗时先脱离父窗口，跑完自行回收，
+# 避免 QThread 在窗口销毁时仍处于 running。
+_LIVE_VOICE_WORKERS: set = set()
+
+
+def _keep_voice_worker(w):
+    _LIVE_VOICE_WORKERS.add(w)
+    w.finished.connect(lambda: _LIVE_VOICE_WORKERS.discard(w))
 
 
 def prefer_xcb():
@@ -200,6 +212,17 @@ class PetWindow(QWidget):
         self._mouth = self._load_mouth_overlay(item)
         self._render_rgba = (self._mouth.apply(asset.rgba)
                              if self._mouth is not None else asset.rgba)
+        # B-4：同族档位一次性读入并在素材分辨率各合成一次；说话期间只换
+        # 已预计算的显示帧，不在帧循环里重做 apply（T-M3 的约束继续成立）。
+        self._mouth_set, self._mouth_default = self._load_mouth_set(item)
+        self._mouth_levels = tuple(self._mouth_set)
+        self._mouth_sources = {
+            lvl: (self._render_rgba if lvl == self._mouth_default
+                  else ov.apply(asset.rgba))
+            for lvl, ov in self._mouth_set.items()}
+        self._speak_until = 0.0
+        self._tts_worker = None
+        self._asr_worker = None
         # B-2：smile 走配置期独立覆盖层，不依赖 ExprBank 贴片
         self._smile = self._load_smile_overlay(item)
         # AI 动作生成：joy / sleepy 也走独立覆盖层，状态名封闭在本文件白名单
@@ -350,6 +373,11 @@ class PetWindow(QWidget):
         self.blink_pixmaps = [to_pixmap(f, height) for f in self.raw_blink]
         # 头发飘动要按显示尺寸重采样 RGBA，位移场也按显示尺寸烘焙
         self.base_rgba = resize_rgba(self._render_rgba, self.base.height())
+        # B-4：各档位显示帧只在这里烘焙；切档时直接取，不重新合成
+        self._mouth_frames: dict[str, tuple[np.ndarray, QPixmap]] = {}
+        for lvl, src in self._mouth_sources.items():
+            f = resize_rgba(src, self.base.height())
+            self._mouth_frames[lvl] = (f, to_pixmap(f, self.base.height()))
         # 碰撞用的主体包围盒（不含窗口透明边距）：按不透明像素算，
         # 再留几像素余量覆盖呼吸/摇摆的轻微形变，避免边缘刚好蹭到
         alpha = self.base_rgba[:, :, 3]
@@ -599,6 +627,10 @@ class PetWindow(QWidget):
             if active:
                 src, pm = self.base_rgba, self._compose_group_blink(active)
                 key = ("gblink", tuple(sorted(active.items())))
+            elif self._mouth_speaking():
+                level = cycle_level(self._mouth_levels, self.elapsed)
+                src, pm = self._mouth_frames[level]
+                key = ("mouth", level)
             elif self._expr_active():
                 state = self._resolved.get("expr") or "normal"
                 src, pm = self._expr_frame(state)
@@ -617,6 +649,14 @@ class PetWindow(QWidget):
         return pm
 
     # ---------- 表情差分（半眼 / 惊讶 / 单侧眨眼） ----------
+    def _mouth_speaking(self) -> bool:
+        """说话窗口内且有至少两档可切；暂停时冻结当前观感。"""
+        if self.paused:
+            return False
+        busy = (self._tts_worker is not None
+                or time.monotonic() < self._speak_until)
+        return should_cycle(self._mouth_levels, busy)
+
     def _expr_active(self) -> bool:
         """当前是否该显示表情贴片（normal 一律走原路径，保证零重影）。"""
         return (not self.paused and self.expr_enabled
@@ -865,6 +905,24 @@ class PetWindow(QWidget):
         if not name:
             return None
         return MouthOverlay.load(src.parent, name, self.asset.rgba.shape[:2])
+
+    def _load_mouth_set(self, item: dict | None):
+        """B-4：按 `mouth_dir` 命名约定加载同族档位；不符合约定返回空。
+
+        与 `_load_mouth_overlay` 共用 item 解析规则；缺档静默、越界/损坏
+        仍由 `MouthOverlay.load()` 守卫，不在这里拼路径绕过。
+        """
+        src = self.asset.source
+        if src is None:
+            return {}, None
+        item = self._resolve_item(item)
+        if not isinstance(item, dict):
+            return {}, None
+        name = mouth_name(item, Path(src).stem)
+        if not name:
+            return {}, None
+        return load_mouth_set(Path(src).parent, name,
+                              self.asset.rgba.shape[:2])
 
     def _resolve_item(self, item: dict | None) -> dict | None:
         """item 优先；否则按 source 在 manifest 里唯一匹配；不唯一 / 失败返回 None。"""
@@ -1303,6 +1361,7 @@ class PetWindow(QWidget):
             return
         self._chat_streaming = True
         self._chat_buf += token
+        self._mark_speaking(0.8)
         # 流式内容是 JSON 原文，只把 text 字段的已到达部分冒进气泡
         self._bubble((partial_text(self._chat_buf) or "…")[-60:], hold_ms=2000)
 
@@ -1342,14 +1401,69 @@ class PetWindow(QWidget):
             except Exception:
                 pass
         if text:
-            try:
-                try:
-                    from .voice_io import speak
-                except ImportError:
-                    from voice_io import speak
-                speak(self._chat_cfg, text)
-            except Exception:
-                pass
+            self._mark_speaking(min(6.0, 0.06 * len(text) + 0.6))
+            self._start_speak(text)
+
+    def _mark_speaking(self, seconds: float):
+        """把说话窗口向后推；chunk / done / TTS 都只延长，不提前截断。"""
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            return
+        if seconds > 0:
+            self._speak_until = max(self._speak_until,
+                                    time.monotonic() + seconds)
+
+    def _start_speak(self, text: str):
+        """TTS 放后台线程：subprocess 不占 GUI 线程，嘴型窗口由 worker 兜住。"""
+        if self._tts_worker is not None or not tts_ready(self._chat_cfg):
+            return
+        try:
+            from .chat_worker import SpeakWorker
+        except ImportError:
+            from chat_worker import SpeakWorker
+        w = SpeakWorker(self._chat_cfg, text)
+        w.done.connect(self._on_speak_done)
+        self._tts_worker = w
+        _keep_voice_worker(w)
+        w.start()
+
+    def _on_speak_done(self, ok: bool):
+        self._tts_worker = None
+
+    # ---------- 语音输入（ASR，默认关） ----------
+    def _asr_prompt(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择语音文件", "",
+            "音频 (*.wav *.mp3 *.m4a *.flac *.ogg);;所有文件 (*)")
+        if path:
+            self._asr_start(path)
+
+    def _asr_start(self, path: str):
+        """识别走后台线程；结果复用 `_chat_send`，不另开一条发话通道。"""
+        if self._asr_worker is not None:
+            return
+        try:
+            from .chat_worker import AsrWorker
+        except ImportError:
+            from chat_worker import AsrWorker
+        w = AsrWorker(self._chat_cfg, path)
+        w.done.connect(self._asr_on_done)
+        w.finished.connect(self._asr_on_finished)
+        self._asr_worker = w
+        self._bubble("正在识别…", hold_ms=3000)
+        _keep_voice_worker(w)
+        w.start()
+
+    def _asr_on_done(self, text: str):
+        text = (text or "").strip()
+        if text:
+            self._chat_send(text[:200])
+        else:
+            self._bubble("没听清…", hold_ms=1500)
+
+    def _asr_on_finished(self):
+        self._asr_worker = None
 
     def _chat_on_failed(self):
         self._chat_streaming = False
@@ -1373,8 +1487,14 @@ class PetWindow(QWidget):
             bound[menu.addAction(label)] = aid
         if bound:
             menu.addSeparator()
+        act_asr = None
         if self.chat_enabled:
             act_chat = menu.addAction("说句话…")
+            act_asr = menu.addAction("语音输入…")
+            if not asr_ready(self._chat_cfg):
+                act_asr.setEnabled(False)
+                act_asr.setToolTip(
+                    "需要 agent.json 的 voice.enabled=true 且填了 voice.asr")
         else:
             act_chat = menu.addAction("说句话…（未启用）")
             act_chat.setEnabled(False)
@@ -1439,6 +1559,8 @@ class PetWindow(QWidget):
             self._open_action_settings()
         elif act is not None and act == act_chat:
             self._chat_prompt()
+        elif act is not None and act == act_asr:
+            self._asr_prompt()
         elif act == act_pause:
             self.paused = not self.paused
             self.update()

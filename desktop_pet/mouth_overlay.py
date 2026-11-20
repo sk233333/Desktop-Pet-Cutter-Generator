@@ -100,12 +100,15 @@ class MouthOverlay:
         self._alpha = alpha         # float32 (h, w, 1)，0..1
 
     @classmethod
-    def load(cls, sku_dir, name, size) -> "MouthOverlay | None":
+    def load(cls, sku_dir, name, size, *,
+             quiet_missing: bool = False) -> "MouthOverlay | None":
         """只读加载；任何失败都返回 None，不把异常带进帧循环。
 
         sku_dir: SKU 目录
         name:    manifest item 的 mouth_dir（相对 SKU 目录）
         size:    (height, width)，必须等于素材 rgba.shape[:2]
+        quiet_missing: 仅为 True 时，文件不存在不 warn（同族可选档位探测用）；
+                       其余失败照常 warn，路径守卫与尺寸校验不放松
         """
         if not isinstance(name, str) or not name.strip():
             return None
@@ -135,7 +138,8 @@ class MouthOverlay:
             _warn("越界路径", root, name)
             return None
         if not path.is_file():
-            _warn("覆盖层不存在", root, name)
+            if not quiet_missing:
+                _warn("覆盖层不存在", root, name)
             return None
 
         try:
