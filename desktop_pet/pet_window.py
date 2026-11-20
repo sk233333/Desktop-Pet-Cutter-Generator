@@ -40,11 +40,13 @@ import math
 import os
 import random
 import sys
+import threading
 import time
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QPoint, QPointF, QRect, Qt, QTimer
+from PyQt6.QtCore import (QPoint, QPointF, QRect, Qt, QTimer,
+                          pyqtSignal)
 from PyQt6.QtGui import (QCursor, QFont, QGuiApplication, QImage, QPainter,
                          QPixmap, QTransform)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QGridLayout,
@@ -195,10 +197,13 @@ class _DirPad(QWidget):
 
 
 class PetWindow(QWidget):
+    # MCP 的 notify 从 stdio 线程进来；用信号排队到 GUI 线程再碰 arbiter。
+    mcp_event = pyqtSignal(object)
+
     def __init__(self, asset: PetAsset, height: int | None,
                  fps: int = 24, blink: bool = True, animate: bool = True,
                  gaze: bool = True, land: bool = True, hair: bool = True,
-                 pack=None, item: dict | None = None):
+                 pack=None, item: dict | None = None, mcp: bool = False):
         super().__init__(None,
                          Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint
@@ -277,6 +282,7 @@ class PetWindow(QWidget):
         # 任何地方都不再直接改表情状态（写入一律走 arbiter.request）。
         self.arbiter = Arbiter()
         self._resolved = self.arbiter.resolve()
+        self.mcp_event.connect(self._on_mcp_event)
         self._last_bubble = ""
         self.expr_enabled = True       # 随机表情开关（右键菜单「表情」里可关）
 
@@ -322,7 +328,7 @@ class PetWindow(QWidget):
         self._chat_buf = ""
         self._chat_bubble_text = ""
         self._overlay_hint = None      # 语义提示：只改取图，不改状态名
-        if self.chat_enabled:
+        if self.chat_enabled or mcp:
             try:
                 try:
                     from .expr_state import STATES
@@ -1250,7 +1256,8 @@ class PetWindow(QWidget):
         self._press_global = None
         self._last_global = None
         if not moved:
-            # 单击：跳一下 + 连眨两下
+            # 单击：先收起气泡（外部通知的「知道了」），再跳一下 + 连眨两下
+            self._ack_bubble()
             self._bounce(1.0)
             if self.blink_enabled:
                 self.blink_start = self.elapsed
@@ -1299,6 +1306,58 @@ class PetWindow(QWidget):
     def _hide_bubble(self):
         if self._bubble_lbl is not None:
             self._bubble_lbl.hide()
+
+    def _ack_bubble(self):
+        """点一下 = 知道了：只本地收起，不回传外部（Q4a 不回传）。"""
+        if self._bubble_lbl is None or self._bubble_lbl.isHidden():
+            return
+        self._hide_bubble()
+        self._chat_bubble_text = ""
+        self._last_bubble = ""
+        self.arbiter.request("interaction", "bubble", "", 0)
+
+    # ---------- 本地 MCP / 办公事件桥（默认关） ----------
+    def build_mcp_host(self):
+        """stdio 适配层：只注入只读查询与 notify，不暴露任何写盘入口。"""
+        try:
+            from .mcp_office import OfficeHost
+        except ImportError:
+            from mcp_office import OfficeHost
+        src = getattr(self.asset, "source", None)
+        src = Path(src) if src else None
+        return OfficeHost(
+            allowed=self.chat_allowed, sku=self.sku,
+            manifest_path=(src.parent / "manifest.json") if src else None,
+            stem=src.stem if src else "",
+            notify=self._mcp_notify,
+            health={"chat_enabled": self.chat_enabled,
+                    "voice": {"tts": tts_ready(self._chat_cfg),
+                              "asr": asr_ready(self._chat_cfg)}},
+        )
+
+    def _mcp_notify(self, text: str, emotion: str, mood_hint):
+        """stdio 线程调用：排队到 GUI 线程写 arbiter，2 秒不达即视为未送达。"""
+        done, box = threading.Event(), {}
+        try:
+            self.mcp_event.emit({"text": text, "emotion": emotion,
+                                 "mood_hint": mood_hint,
+                                 "done": done, "box": box})
+        except RuntimeError:
+            return False
+        done.wait(2.0)
+        return bool(box.get("ok"))
+
+    def _on_mcp_event(self, item):
+        """GUI 线程唯一落点：气泡 + 表情仍只经 arbiter.request。"""
+        text = str(item.get("text") or "")[:200]
+        emotion = str(item.get("emotion") or "normal")
+        self._set_overlay_hint(item.get("mood_hint"))
+        expr_ok = self.arbiter.request("interaction", "expr", emotion, 3000)
+        bubble_ok = self.arbiter.request("interaction", "bubble", text, 6000)
+        if text:
+            self._chat_bubble_text = text
+        item["box"]["ok"] = bool(text) and bool(expr_ok or bubble_ok)
+        item["done"].set()
 
     def _open_action_settings(self):
         """图形化配置动作：选程序、勾双击、保存后立即生效（不用重启）。"""
@@ -1826,7 +1885,16 @@ def main():
     ap.add_argument("--no-anim", action="store_true", help="关闭呼吸与摇摆")
     ap.add_argument("--no-gaze", action="store_true", help="关闭视线跟随")
     ap.add_argument("--no-land", action="store_true", help="关闭落地回弹（松手后原地停住，只有惯性）")
+    ap.add_argument("--mcp-stdio", action="store_true",
+                    help="启动本地 MCP stdio 服务（默认关；stdout 只走协议）")
     args = ap.parse_args()
+
+    proto_out = None
+    if args.mcp_stdio:
+        # stdout 留给协议；所有 print / 警告改走 stderr，避免污染 JSONL
+        sys.stdout.flush()
+        proto_out = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
+        os.dup2(2, 1)
 
     if args.stems and args.count != 1:
         raise SystemExit("--stems 与 --count 只能用一个")
@@ -1875,7 +1943,8 @@ def main():
         win = PetWindow(asset, height, fps=args.fps,
                         blink=not args.no_blink, animate=not args.no_anim,
                         gaze=(not args.no_gaze) and gaze_ok,
-                        land=not args.no_land, pack=pack)
+                        land=not args.no_land, pack=pack,
+                        mcp=args.mcp_stdio)
         win.show()
         wins.append((win, png, eyes))
     if pack:
@@ -1896,6 +1965,17 @@ def main():
             print("[平台] 原生 Wayland 下窗口无法自定位，多只桌宠不会散开也不会碰撞；"
                   "去掉 QT_QPA_PLATFORM=wayland 即可自动改走 XWayland")
     print("左键单击 = 跳一下，拖动甩出 = 惯性+落地回弹，滚轮缩放，双击暂停，右键菜单")
+    if args.mcp_stdio and proto_out is not None:
+        try:
+            from .mcp_stdio import run_stdio
+        except ImportError:
+            from mcp_stdio import run_stdio
+        host = win.build_mcp_host()
+        threading.Thread(target=run_stdio,
+                         args=(host, sys.stdin, proto_out),
+                         daemon=True).start()
+        print("[mcp] stdio 服务已启动（默认只读 + propose；无 socket）",
+              file=sys.stderr)
     sys.exit(app.exec())
 
 
