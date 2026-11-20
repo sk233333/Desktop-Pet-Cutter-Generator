@@ -270,7 +270,9 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
   运行时词表见下一节；`calib.*` / L3 仍不在向导范围。
 - `ExprBank` 七态（`smile` 末尾）、`smile → half` 别名已拆；`mouth_dir` 与
   `smile_geometry.overlay` 在桌面运行时按静态常驻合成（素材分辨率一次）；
-  说话驱动排 v0.1.1。编辑器 `PetPreview` 首期不同步。测试以 `pytest -q` 当前结果为准。
+  `mouth_dir` 按 `<stem>_mouth_<closed|smile|o>.png` 约定命名时，说话期间
+  在已预计算的三档间切换（v0.2.1），不每帧重绘。编辑器 `PetPreview`
+  首期不同步。测试以 `pytest -q` 当前结果为准。
 
 ### AI 对话（A1，默认关闭）
 
@@ -297,10 +299,11 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 - `mood_hint` 只从封闭覆盖层键（joy / sleepy / angry / sad / shy）里选，
   有对应素材时优先取图，不新增状态名。
 - 无 key / 断网 / 429 / 超时 / 乱码 → 静默回 idle，不弹错误气泡。
-- `mouth_dir` 已在桌面运行时消费；说话驱动嘴型（B-4）、生成式候选、
-  心跳、滚动摘要排 v0.1.1。
+- `mouth_dir` 已在桌面运行时消费；说话驱动嘴型（B-4）已接线（v0.2.1）：
+  同族三档在说话窗口内切换预计算帧；生成式候选、心跳、滚动摘要仍未做。
 - 语音默认关：`agent.json` 的 `voice.enabled=true` 且填了 `tts` / `asr`
-  命令才会调用；ASR 的 UI 入口留独立轮。
+  命令才会调用；TTS 在后台线程播放不卡动画；`asr` 可用时右键出现
+  「语音输入…」，识别文本复用「说句话」通道。
 - 测试：以 `pytest -q` 当前输出为准（嘴型集成测试需本地 PyQt6，
   CI 五包会 skip 该文件）。
 

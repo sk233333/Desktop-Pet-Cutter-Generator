@@ -2,6 +2,25 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## N1（v0.2.1）
+
+### 行为变更
+
+- **B-4 说话驱动嘴型切档**：`mouth_dir` 若按 `mouth.open` 的命名约定
+  （`<stem>_mouth_<closed|smile|o>.png`），启动时加载同族档位并在素材分辨率
+  各合成一次；A1 流式 chunk / 回复气泡 / TTS 播放期间按 0.16s 在**已预计算
+  的显示帧**之间切换，窗口结束后回到 `mouth_dir` 静态档。不符合约定的
+  单档覆盖层行为不变；同族缺档静默跳过。`STATES` / 词表 /
+  `ExprBank.apply` / manifest schema 全不动，帧循环里不做任何合成。
+- **ASR UI**：`voice.enabled=true` 且 `voice.asr` 命令可用时，右键新增
+  「语音输入…」；选音频文件后由后台线程调 `transcribe()`，识别文本复用
+  `_chat_send` 发话，不另开通道。未配置时菜单项置灰；默认仍关。
+- **TTS 非阻塞**：回复后的 `speak()` 从 GUI 线程移到 QThread，长命令不再
+  卡住动画；说话窗口由 worker 生命周期兜住，失败静默。
+- 测试：新增 Qt-free `tests/test_mouth_runtime.py`（三档发现 / 缺档静默 /
+  路径守卫 / 切档时钟）；GUI 冒烟补三档切换、单档静态回退与预计算断言
+  （CI 五包继续 skip 该文件）。
+
 ## W4~W7（本地未 push）
 
 ### 行为变更

@@ -183,6 +183,10 @@ class MouthOverlay:
 - **Q2 = 静态常驻**：`mouth_dir` 指向哪一档，就常驻显示哪一档；无 `mouth_dir` 时完全不合成。
   「说话才张嘴」要接 A1 的 chunk 信号切档，是另一条功能，排 v0.1.1，**不估成小改**；
   STATES / 别名表 / `apply()` 签名 / A1 worker 全不碰。
+  > **v0.2.1 更新（B-4）**：`mouth_runtime.py` 按 `<stem>_mouth_<closed|smile|o>.png`
+  > 约定加载同族档位，在说话窗口内切换**已预计算的显示帧**；不同族命名、
+  > 缺档或非说话时段仍为静态常驻。帧循环里无 `apply()`，STATES / 别名表 /
+  > `apply()` 签名 / arbiter 均未改。
 - **Q3 = 单 item 精确匹配**：`stem` 命中多条 → 跳过 + warn，不猜第一条；
   与「禁止静默 zip 截断」同一原则。
 - **Q4 = 首期不同步编辑器预览**：已读码确认 `PetPreview` 是 `ui_app.py` 里独立取帧管线，

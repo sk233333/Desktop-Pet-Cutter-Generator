@@ -65,8 +65,9 @@
 ## 2. 统一红线（每轮）
 
 - `expr_state.py` 自 `7531ff3` 零字节（含 STATES / 别名表）。
+  v0.2 之后保护基线改写为 `d21ac36`（逐字节核对），哈希值不变。
 - `anim.py / arbiter.py / manifest_io.py / manifest.schema.json /
-  effect_table.json / .github/workflows` 零 diff。
+  effect_table.json / .github/workflows` 零 diff（v0.2 后同样以 `d21ac36` 为基线）。
 - 保护文件 7 项哈希；tag `v0.1` 不动。
 - 零权重：`.pt/.pth/.ckpt/.safetensors/.onnx`、`desktop_pet/models/` 全 ignore；
   40M clone 不破。
@@ -90,9 +91,9 @@ python3 -m pytest --collect-only -q | grep -E 'test_aig_|test_agent_|test_ai_'
 python3 -m py_compile desktop_pet/*.py
 # 干净 venv 五包 + MPLBACKEND=Agg + import PyQt6 → ModuleNotFoundError
 QT_QPA_PLATFORM=offscreen python3 desktop_pet/ui_app.py
-git diff --name-only 7531ff3..HEAD -- <保护文件 7 项>   # 期望空
+git diff --name-only d21ac36..HEAD -- <保护文件 7 项>   # 期望空
 git status --porcelain                                # 期望仅 ?? docs/images/
-git rev-parse --short origin/main                     # 期望仍 7531ff3（未 push）
+git rev-parse --short origin/main                     # push 前期望 d21ac36
 ```
 
 - 数字以实测为准；commit message 写实际值，文档写「以 pytest -q / git log
@@ -176,6 +177,7 @@ git push origin main          # 唯一一次
 | W5 切割质检 | ✅ `cut_quality.py` 只读打分（白边/阴影/软边/覆盖率/毛刺）+ 主界面「切割质检…」+ `--batch-report`；不自动重切 |
 | W6 memory + 独立 Agent | ✅ `memory_store.py`（显式触发、原子写、0600、sku 守卫、不喂词表）+ `agent_bridge.py`（JSONL/stdio，触发源不是状态源） |
 | W7 对话语音 | ⚠ TTS 接线、ASR 仅函数；`mood_hint` 接覆盖层取图；ASR UI 与说话驱动嘴型留独立轮 |
+| N1（v0.2.1）B-4 + ASR UI | ✅ 同族三档预计算切帧（不每帧 apply）+ ASR 后台线程与菜单入口 + TTS 非阻塞；单档 SKU 行为不变 |
 | W8 Go/No-Go → push → v0.2 | ⬜ 本地验证已跑；push / tag 等人工核查后再执行 |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
 
@@ -257,3 +259,23 @@ git push origin main          # 唯一一次
 
 新节点 19 个（`test_agent_*` 13 + `test_cut_quality` 5 +
 `test_new_overlay_keys_render_without_new_states` 1）。
+
+### 8.3 N1（v0.2.1）：B-4 + ASR UI
+
+- **保护基线**：v0.2 之后以 `d21ac36` 为基线；保护 7 项继续按内容哈希核对，
+  `expr_state.py` 哈希值不动（仍是 `c14c92c…` 的同一字节）。
+- **B-4 落点**：`desktop_pet/mouth_runtime.py`（Qt-free）按
+  `<stem>_mouth_<closed|smile|o>.png` 约定展开同族档位；`MouthOverlay.load`
+  只新增 `quiet_missing`（缺档不 warn，路径/尺寸守卫不放松）。
+  `PetWindow.__init__` 每档在素材分辨率合成一次，`_rebuild()` 烘焙显示帧；
+  `_pick_frame()` 只在说话窗口内换预计算帧，**没有任何 `apply()`**。
+  说话窗口 = 流式 chunk（每次 +0.8s）、`done` 后按文本长度延长、
+  TTS worker 运行期间兜住；暂停时冻结。
+- **ASR UI**：右键「语音输入…」→ `QFileDialog` → `AsrWorker`（QThread）→
+  `voice_io.transcribe` → `_chat_send`。`voice.enabled` 未开或命令不可用时
+  置灰。TTS 的同步 `speak()` 改为 `SpeakWorker`，不再阻塞 GUI。
+- **边界未变**：不新增 STATES / 别名 / schema；`arbiter` 通道矩阵不动；
+  零新 Python 依赖；ASR/TTS 默认关，CI 五包仍只 skip GUI 文件。
+- **下一批未并项**：整帧重绘与中间帧、A 档真素材标定、C-1、已否决 7 项，
+  继续按原口径单列。
+
