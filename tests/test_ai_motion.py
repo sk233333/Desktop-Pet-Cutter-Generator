@@ -171,7 +171,8 @@ def test_parse_proposal_clamps_and_fills_current():
         "sway": {"hair": [{"amp": 9, "dir": -30, "bias": 100}],
                  "cloth": []},
         "expressions": {"joy": {"lid_drop": 9, "blush_alpha": -3},
-                        "angry": {"lid_drop": 1}},
+                        "angry": {"lid_drop": 1},
+                        "furious": {"lid_drop": 1}},
     }, req)
     assert prop.anim["sway_deg"] == ANIM_RANGES["sway_deg"][1]
     assert prop.anim["bounce"] == 0.0
@@ -185,11 +186,12 @@ def test_parse_proposal_clamps_and_fills_current():
     assert len(prop.sway["hair"]) == 2
     assert prop.sway["hair"][1]["amp"] == 0.8
     assert len(prop.sway["cloth"]) == 1
-    # 表情只接受封闭白名单
-    assert set(prop.expressions) == {"joy"}
+    # 表情只接受封闭白名单；angry 已开放，furious 仍被拒
+    assert set(prop.expressions) == {"joy", "angry"}
     assert prop.expressions["joy"]["lid_drop"] == 0.45
     assert prop.expressions["joy"]["blush_alpha"] == 0.0
-    assert any("angry" in w for w in prop.warnings)
+    assert prop.expressions["angry"]["lid_drop"] == 0.45
+    assert any("furious" in w for w in prop.warnings)
 
 
 def test_parse_proposal_rejects_non_object():
@@ -381,6 +383,33 @@ def test_changeset_only_writes_selected(tmp_path):
     assert img.shape == (H, W, 4) and (img[..., 3] > 0).any()
 
 
+def test_new_overlay_keys_render_without_new_states(tmp_path):
+    """angry/sad/shy 是封闭覆盖层键：能出图，但不进 STATES / 词表。"""
+    from expr_state import STATES
+
+    d = _sku(tmp_path / "demo")
+    item = read_manifest(d / "manifest.json")["items"][0]
+    req = request_from_item("demo", "pet", item)
+    flat = {"lid_drop": 0.0, "lid_sag": 0.0, "arc_ratio": 0.0,
+            "blush_alpha": 0.0}
+    keys = ("joy", "sleepy", "angry", "sad", "shy")
+    prop = parse_proposal(
+        {"expressions": {k: dict(flat) for k in keys}}, req)
+    assert set(prop.expressions) == set(keys)
+    assert not any("忽略未开放" in w for w in prop.warnings)
+
+    cs = build_changeset(sku="demo", stem="pet", item_index=0, item=item,
+                         proposal=prop,
+                         selected={f"expr/{k}" for k in keys})
+    assert set(cs.files) == {f"pet_{k}.png" for k in keys}
+    for key in ("angry", "sad"):
+        img = cv2.imdecode(np.frombuffer(cs.files[f"pet_{key}.png"], np.uint8),
+                           cv2.IMREAD_UNCHANGED)
+        assert (img[..., 3] > 0).any(), f"{key} 参数全 0 时也应有眉毛像素"
+    assert set(STATES) == {"normal", "blink", "half", "surprise", "wink_l",
+                           "wink_r", "smile"}
+
+
 def test_commit_selected_writes_and_validates(tmp_path):
     d = _sku(tmp_path / "demo")
     base_before = (d / "pet.png").read_bytes()
@@ -483,11 +512,13 @@ def test_overlay_keys_do_not_rebuild_alias():
     allowed = derive_allowed("x", STATES, [], None)
     assert allowed["emotion"] == ["normal", "half", "surprise", "wink_l",
                                   "wink_r", "smile"]
-    assert "joy" not in allowed["emotion"]
-    assert "sleepy" not in allowed["emotion"]
+    for key in ("joy", "sleepy", "angry", "sad", "shy"):
+        assert key not in allowed["emotion"]
 
     src = (ROOT / "desktop_pet" / "pet_window.py").read_text(encoding="utf-8")
-    assert '"smile": "joy"' in src and '"half": "sleepy"' in src
+    assert '"smile": ("joy", "shy")' in src
+    assert '"half": ("sleepy", "sad")' in src
+    assert '"surprise": ("angry",)' in src
     assert "apply(self._render_rgba, overlay_key)" not in src
     assert "apply(self._render_rgba, state)" in src
 
