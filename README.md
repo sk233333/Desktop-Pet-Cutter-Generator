@@ -307,6 +307,23 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 - 测试：以 `pytest -q` 当前输出为准（嘴型集成测试需本地 PyQt6，
   CI 五包会 skip 该文件）。
 
+### 本地 MCP（v0.2.2，默认关闭）
+
+只有启动参数显式带 `--mcp-stdio` 时才启用；默认零 socket、零监听。
+协议与方向无关，同一套 JSONL 消息体（`tools/list` / `tools/call` / `notify`）。
+
+```bash
+python3 desktop_pet/pet_window.py --sku bgy --stem bgy_001_white --mcp-stdio
+```
+
+- 工具白名单五个：`get_health` / `get_allowed` / `get_manifest_item` /
+  `propose_candidate` / `notify_bubble`；不提供 commit、写盘、exec。
+- `notify` 只写 `arbiter.request("interaction", "bubble"/"expr", ...)`；
+  点一下气泡 = 知道了，只在本地收起，不回传外部。
+- `stdout` 只走协议，原有 print / warn 改走 `stderr`；超长（>64KB）与
+  畸形 JSON 各回一条错误，不崩、不落盘。
+- 协议层零新依赖，干净 venv 五包可直接跑 `test_mcp_*`。
+
 ### 跑起来（桌宠）
 
 ```bash

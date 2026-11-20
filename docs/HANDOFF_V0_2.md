@@ -65,9 +65,10 @@
 ## 2. 统一红线（每轮）
 
 - `expr_state.py` 自 `7531ff3` 零字节（含 STATES / 别名表）。
-  v0.2 之后保护基线改写为 `d21ac36`（逐字节核对），哈希值不变。
+  v0.2 之后保护基线改写为 `d21ac36`，v0.2.2 起改用 `55ca8fe`（逐字节核对），
+  哈希值不变。
 - `anim.py / arbiter.py / manifest_io.py / manifest.schema.json /
-  effect_table.json / .github/workflows` 零 diff（v0.2 后同样以 `d21ac36` 为基线）。
+  effect_table.json / .github/workflows` 零 diff（基线随版本前移）。
 - 保护文件 7 项哈希；tag `v0.1` 不动。
 - 零权重：`.pt/.pth/.ckpt/.safetensors/.onnx`、`desktop_pet/models/` 全 ignore；
   40M clone 不破。
@@ -91,9 +92,9 @@ python3 -m pytest --collect-only -q | grep -E 'test_aig_|test_agent_|test_ai_'
 python3 -m py_compile desktop_pet/*.py
 # 干净 venv 五包 + MPLBACKEND=Agg + import PyQt6 → ModuleNotFoundError
 QT_QPA_PLATFORM=offscreen python3 desktop_pet/ui_app.py
-git diff --name-only d21ac36..HEAD -- <保护文件 7 项>   # 期望空
+git diff --name-only 55ca8fe..HEAD -- <保护文件 7 项>   # 期望空
 git status --porcelain                                # 期望仅 ?? docs/images/
-git rev-parse --short origin/main                     # push 前期望 d21ac36
+git rev-parse --short origin/main                     # push 前期望 55ca8fe
 ```
 
 - 数字以实测为准；commit message 写实际值，文档写「以 pytest -q / git log
@@ -178,6 +179,7 @@ git push origin main          # 唯一一次
 | W6 memory + 独立 Agent | ✅ `memory_store.py`（显式触发、原子写、0600、sku 守卫、不喂词表）+ `agent_bridge.py`（JSONL/stdio，触发源不是状态源） |
 | W7 对话语音 | ⚠ TTS 接线、ASR 仅函数；`mood_hint` 接覆盖层取图；ASR UI 与说话驱动嘴型留独立轮 |
 | N1（v0.2.1）B-4 + ASR UI | ✅ 同族三档预计算切帧（不每帧 apply）+ ASR 后台线程与菜单入口 + TTS 非阻塞；单档 SKU 行为不变 |
+| N2（v0.2.2）本地 MCP | ✅ 方向无关 stdio 窄协议，五个只读/propose 工具；notify 只写 arbiter；默认关、无 socket |
 | W8 Go/No-Go → push → v0.2 | ⬜ 本地验证已跑；push / tag 等人工核查后再执行 |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
 
@@ -278,4 +280,17 @@ git push origin main          # 唯一一次
   零新 Python 依赖；ASR/TTS 默认关，CI 五包仍只 skip GUI 文件。
 - **下一批未并项**：整帧重绘与中间帧、A 档真素材标定、C-1、已否决 7 项，
   继续按原口径单列。
+
+### 8.4 N2（v0.2.2）：本地 MCP 收窄版
+
+- **入口**：`pet_window.py --mcp-stdio`，默认关；stdout 只走协议，
+  print / warn 改 stderr。
+- **协议**：`mcp_stdio.py` 方向无关 JSONL（`tools/list` / `tools/call` /
+  `notify`）；64KB 上限、畸形 JSON、未知工具/方法都回错误，不崩。
+- **适配**：`mcp_office.OfficeHost` 只读 manifest 白名单字段 + 候选 +
+  notify；`notify` 注入桌宠侧回调，最终只走
+  `arbiter.request("interaction", "bubble"/"expr", ...)`；无 commit /
+  写盘 / exec / socket / 新依赖。
+- **确认**：点一下气泡 = 知道了，仅本地收起，不回传外部（Q4a）。
+- **基线**：保护 7 项自 `55ca8fe` 零 diff；`v0.1` / `v0.2` / `v0.2.1` 未动。
 

@@ -2,6 +2,24 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## v0.2.2（本地 MCP 收窄版）
+
+### 行为变更
+
+- 新增 `--mcp-stdio`（默认关）：本地 stdio JSONL 窄协议，方向无关，
+  只实现 `tools/list` / `tools/call` / `notify`；没有 socket、不监听端口，
+  `stdout` 只走协议，原有 print / warn 改走 `stderr`。
+- 工具白名单五个：`get_health` / `get_allowed` / `get_manifest_item` /
+  `propose_candidate` / `notify_bubble`；不暴露 commit、写盘、exec。
+- 外部通知唯一落点仍是 `arbiter.request("interaction", "bubble"/"expr", ...)`：
+  不新增 `"agent": 2`、不改 `_render_rgba` / `self.base`、不写 manifest。
+- 办公闭环第一版：单向播报 + 点一下收起气泡（本地确认）；不回传外部
+  （Q4a 已拍板，避免长出反馈回路）。
+- `propose_candidate` 只回正规化候选（`persisted: False`，默认零勾选）；
+  `get_manifest_item` 只回 basename 与白名单字段，不回绝对路径。
+- 协议层零新 Python 依赖：标准库 `json` / `io` 即可；干净 venv 五包
+  能直接收集 `test_mcp_*`，GUI 文件仍只 skip 1 个模块。
+
 ## N1（v0.2.1）
 
 ### 行为变更
