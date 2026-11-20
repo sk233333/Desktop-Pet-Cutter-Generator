@@ -180,6 +180,7 @@ git push origin main          # 唯一一次
 | W7 对话语音 | ⚠ TTS 接线、ASR 仅函数；`mood_hint` 接覆盖层取图；ASR UI 与说话驱动嘴型留独立轮 |
 | N1（v0.2.1）B-4 + ASR UI | ✅ 同族三档预计算切帧（不每帧 apply）+ ASR 后台线程与菜单入口 + TTS 非阻塞；单档 SKU 行为不变 |
 | N2（v0.2.2）本地 MCP | ✅ 方向无关 stdio 窄协议，五个只读/propose 工具；notify 只写 arbiter；默认关、无网络 socket |
+| Ⅳ 档边界文档（R1） | ✅ `docs/HANDOFF_V0_3.md`；七项全部未授权、零代码、零行为变更 |
 | W8 Go/No-Go → push → v0.2 | ⬜ 本地验证已跑；push / tag 等人工核查后再执行 |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
 

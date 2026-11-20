@@ -309,7 +309,7 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 
 ### 本地 MCP（v0.2.2，默认关闭）
 
-只有启动参数显式带 `--mcp-stdio` 时才启用；默认零 socket、零监听。
+只有启动参数显式带 `--mcp-stdio` 时才启用；默认无网络 socket、零监听。
 协议与方向无关，同一套 JSONL 消息体（`tools/list` / `tools/call` / `notify`）。
 
 ```bash
@@ -323,6 +323,9 @@ python3 desktop_pet/pet_window.py --sku bgy --stem bgy_001_white --mcp-stdio
 - `stdout` 只走协议，原有 print / warn 改走 `stderr`；超长（>64KB）与
   畸形 JSON 各回一条错误，不崩、不落盘。
 - 协议层零新依赖，干净 venv 五包可直接跑 `test_mcp_*`。
+
+Ⅳ 档（v0.3 候选）的边界与授权范围见 `docs/HANDOFF_V0_3.md`；
+七项均未授权、未实现，不要按「已交付」对外表述。
 
 ### 跑起来（桌宠）
 

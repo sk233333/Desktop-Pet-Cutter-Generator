@@ -2,12 +2,20 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## v0.3 边界（仅文档，未授权实现）
+
+- 新增 `docs/HANDOFF_V0_3.md`：Ⅳ 档七项边界一次摊完（W3 选 1、整帧重绘 +
+  中间帧、L2 自主循环、多 Agent、公网/云 API、真实权重、新增状态名）。
+- 七项全部未授权；每项写明结论落层、允许动的文件、断言清单、三档状态与停线。
+- 无代码、无行为变更；保护 7 项自 `06008c9` 零 diff。
+
 ## v0.2.2（本地 MCP 收窄版）
 
 ### 行为变更
 
 - 新增 `--mcp-stdio`（默认关）：本地 stdio JSONL 窄协议，方向无关，
-  只实现 `tools/list` / `tools/call` / `notify`；没有 socket、不监听端口，
+  只实现 `tools/list` / `tools/call` / `notify`；没有网络 socket、不监听端口
+  （Qt 事件循环自用的未命名 Unix socketpair 不计），
   `stdout` 只走协议，原有 print / warn 改走 `stderr`。
 - 工具白名单五个：`get_health` / `get_allowed` / `get_manifest_item` /
   `propose_candidate` / `notify_bubble`；不暴露 commit、写盘、exec。
