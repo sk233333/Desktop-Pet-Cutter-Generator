@@ -65,8 +65,8 @@
 ## 2. 统一红线（每轮）
 
 - `expr_state.py` 自 `7531ff3` 零字节（含 STATES / 别名表）。
-  v0.2 之后保护基线改写为 `d21ac36`，v0.2.2 起改用 `55ca8fe`（逐字节核对），
-  哈希值不变。
+  v0.2 之后保护基线改写为 `d21ac36`，v0.2.2 实现期用 `55ca8fe`（逐字节核对），
+  v0.2.2 结案后下一批起改用 `9981be8`，哈希值不变。
 - `anim.py / arbiter.py / manifest_io.py / manifest.schema.json /
   effect_table.json / .github/workflows` 零 diff（基线随版本前移）。
 - 保护文件 7 项哈希；tag `v0.1` 不动。
@@ -92,9 +92,9 @@ python3 -m pytest --collect-only -q | grep -E 'test_aig_|test_agent_|test_ai_'
 python3 -m py_compile desktop_pet/*.py
 # 干净 venv 五包 + MPLBACKEND=Agg + import PyQt6 → ModuleNotFoundError
 QT_QPA_PLATFORM=offscreen python3 desktop_pet/ui_app.py
-git diff --name-only 55ca8fe..HEAD -- <保护文件 7 项>   # 期望空
+git diff --name-only 9981be8..HEAD -- <保护文件 7 项>   # 期望空
 git status --porcelain                                # 期望仅 ?? docs/images/
-git rev-parse --short origin/main                     # push 前期望 55ca8fe
+git rev-parse --short origin/main                     # push 前期望 9981be8
 ```
 
 - 数字以实测为准；commit message 写实际值，文档写「以 pytest -q / git log
@@ -179,7 +179,7 @@ git push origin main          # 唯一一次
 | W6 memory + 独立 Agent | ✅ `memory_store.py`（显式触发、原子写、0600、sku 守卫、不喂词表）+ `agent_bridge.py`（JSONL/stdio，触发源不是状态源） |
 | W7 对话语音 | ⚠ TTS 接线、ASR 仅函数；`mood_hint` 接覆盖层取图；ASR UI 与说话驱动嘴型留独立轮 |
 | N1（v0.2.1）B-4 + ASR UI | ✅ 同族三档预计算切帧（不每帧 apply）+ ASR 后台线程与菜单入口 + TTS 非阻塞；单档 SKU 行为不变 |
-| N2（v0.2.2）本地 MCP | ✅ 方向无关 stdio 窄协议，五个只读/propose 工具；notify 只写 arbiter；默认关、无 socket |
+| N2（v0.2.2）本地 MCP | ✅ 方向无关 stdio 窄协议，五个只读/propose 工具；notify 只写 arbiter；默认关、无网络 socket |
 | W8 Go/No-Go → push → v0.2 | ⬜ 本地验证已跑；push / tag 等人工核查后再执行 |
 | A 档人工 / C-1 / 已否决 7 项 | 并行 / 不动 / 不做 |
 

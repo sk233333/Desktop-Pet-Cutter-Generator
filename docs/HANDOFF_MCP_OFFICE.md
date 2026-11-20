@@ -130,7 +130,7 @@ Qt 冒烟（CI skip）：气泡 + 表情 + 确认按钮实际出现。
 
 ## 7. 实施顺序（v0.2.2 已按此执行）
 
-1. 方向无关的 stdio 循环：`mcp_stdio.py`（白名单 + JSONL + 默认关，无 socket）；
+1. 方向无关的 stdio 循环：`mcp_stdio.py`（白名单 + JSONL + 默认关，无网络 socket）；
 2. 桌宠侧 adapter：`mcp_office.OfficeHost` 只翻译协议，注入 notify；
 3. Qt-free 测试 `test_mcp_*` + GUI 冒烟（同一 GUI 文件，skip 仍 1）；
 4. 本机实测并入 offscreen 冒烟（§10），不单列一轮；
@@ -157,7 +157,8 @@ printf '{"id":1,"method":"tools/list"}\n' \
 - `tools/list` 回五个白名单工具；`get_health` 回 `protocol` / `sku` /
   开关状态；`notify_bubble` 回 `delivered: true`；
 - `stdout` 只有协议行；`[manifest]` / `[mcp]` 等日志全在 `stderr`；
-- 无监听端口、无 socket；协议层无第三方依赖，干净 venv 五包可收集；
+- 无监听端口、无网络 socket（Qt 事件循环自用的未命名 Unix socketpair 不计）；
+  协议层无第三方依赖，干净 venv 五包可收集；
 - 方向差异未在本机验证（TRAE 本地未接入），只确认消息体与方向无关。
 - 进程级真实启动 / stdout 纯净 / 无监听端口 / UI 未执行的完整记录见
   `docs/HANDOFF_TRAE_MCP_SMOKE.md`。
@@ -171,4 +172,4 @@ printf '{"id":1,"method":"tools/list"}\n' \
 | Q2 工具白名单 | ✅ 五个，只读 + propose，无 commit / 写盘 / exec |
 | Q3 输出落点 | ✅ `arbiter.request("interaction", ...)` 唯一入口 |
 | Q4 最小闭环 / Q4a 回传 | ✅ 单向播报 + 本地收起；第一版不回传 |
-| `v0.2.2` 实现 | ✅ 已实现并验证，待本轮 push + tag |
+| `v0.2.2` 实现 | ✅ `9981be8`，tag `v0.2.2` = `05ccc20` |
