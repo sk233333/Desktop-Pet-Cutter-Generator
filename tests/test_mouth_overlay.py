@@ -222,7 +222,8 @@ def test_pet_window_has_one_mouth_apply_point():
     assert src.count("self._mouth.apply(") == 1
     start = src.index("    def _pick_frame(")
     end = src.index("\n    def ", start + 10)
-    assert "self._mouth.apply(" not in src[start:end]
+    # B-4 切档只换预计算帧：帧循环里任何 apply 都不允许（含 ov.apply）
+    assert ".apply(" not in src[start:end]
 
 
 def test_warn_module_exists():

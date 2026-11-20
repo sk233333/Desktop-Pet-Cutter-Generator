@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -150,6 +151,58 @@ def test_b2_no_smile_overlay_falls_back_to_render_frame(tmp_path):
         assert w._smile is None
         got, _ = w._expr_frame("smile")
         assert np.array_equal(got, resize_rgba(w._render_rgba, w.base.height()))
+    finally:
+        w.close()
+
+
+def test_b4_three_tiers_cycle_only_while_speaking(tmp_path):
+    """说话窗口内只换预计算帧；窗口外回到默认静态档。"""
+    _, asset, item, _ = make_sku(tmp_path, mouth=True, tiers=True)
+    w = win(asset, item)
+    try:
+        w.blink_enabled = False
+        assert w._mouth_levels == ("closed", "smile", "o")
+        assert w._pick_frame() is w.base          # 不说话 → 默认 smile 档
+
+        w._speak_until = time.monotonic() + 5.0
+        w.elapsed = 0.0
+        assert w._pick_frame() is w._mouth_frames["closed"][1]
+        w.elapsed = 0.2
+        assert w._pick_frame() is w._mouth_frames["smile"][1]
+        w.elapsed = 0.4
+        assert w._pick_frame() is w._mouth_frames["o"][1]
+
+        w._speak_until = 0.0
+        assert w._pick_frame() is w.base
+    finally:
+        w.close()
+
+
+def test_b4_single_tier_stays_static_when_speaking(tmp_path):
+    """同族只读到一档时不做切档，避免为动态白白压住表情/视线。"""
+    _, asset, item, _ = make_sku(tmp_path, mouth=True)
+    w = win(asset, item)
+    try:
+        w.blink_enabled = False
+        assert w._mouth_levels == ("smile",)
+        w._speak_until = time.monotonic() + 5.0
+        assert w._pick_frame() is w.base
+    finally:
+        w.close()
+
+
+def test_b4_speaking_frames_are_precomputed(tmp_path):
+    """切档帧在重建时烘焙：说话期间不调用 MouthOverlay.apply。"""
+    _, asset, item, _ = make_sku(tmp_path, mouth=True, tiers=True)
+    w = win(asset, item)
+    try:
+        w.blink_enabled = False
+        w._speak_until = time.monotonic() + 5.0
+        for i in range(50):
+            w.elapsed = i * 0.05
+            w._pick_frame()
+        for level in ("closed", "smile", "o"):
+            assert level in w._mouth_frames
     finally:
         w.close()
 

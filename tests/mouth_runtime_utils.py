@@ -20,7 +20,7 @@ BASE_SRC = ROOT / "assets" / "custom" / "bgy_001_pet.png"
 
 
 def make_sku(tmp: Path, *, mouth: bool, bad: str | None = None,
-             smile: bool = False):
+             smile: bool = False, tiers: bool = False):
     d = tmp / ("with" if mouth else "without")
     d.mkdir(parents=True)
     shutil.copyfile(BASE_SRC, d / "pet.png")
@@ -36,7 +36,19 @@ def make_sku(tmp: Path, *, mouth: bool, bad: str | None = None,
         item["smile_geometry"] = {"overlay": name,
                                   "runtime_consumer": "pet_window",
                                   "preset": "medium"}
-    if mouth:
+    if mouth and tiers:
+        x0, x1 = w // 2 - 8, w // 2 + 8
+        y0, y1 = int(h * 0.68), int(h * 0.68) + 10
+        for level, color in (("closed", (255, 0, 0)),
+                             ("smile", (0, 255, 0)),
+                             ("o", (0, 0, 255))):
+            ov = np.zeros((h, w, 4), np.uint8)
+            ov[y0:y1, x0:x1] = (*color, 255)
+            Image.fromarray(ov, "RGBA").save(d / f"pet_mouth_{level}.png")
+        item["mouth_dir"] = "pet_mouth_smile.png"
+        item["mouth_level"] = "smile"
+        bbox = (x0, x1, y0, y1)
+    elif mouth:
         name = "pet_mouth_smile.png"
         if bad == "size":
             ov = np.zeros((10, 10, 4), np.uint8)
