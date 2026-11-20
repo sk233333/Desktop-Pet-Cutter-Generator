@@ -208,3 +208,52 @@ git push origin main          # 唯一一次
   ASR 只有函数与配置，UI 入口留独立轮。
 - W2 的本地 GroundingDINO/SAM2 权重路线未接线；主界面 AI 切割与文本引导
   已于 2026-11-20 按用户决定删除，向导 AI 抠图与 AI 标注报告保留。
+
+### 8.2 W8 证据（push 前）
+
+**25 个 commit 分轮**（`git log --oneline 7531ff3..HEAD`）：
+
+- 前置 AI 生成（7）：`e7c97d3` `f4f3ec8` `34910f7` `68fc39b` `76cb965`
+  `6c254cb` `e369c5e`
+- W0~W2（7）：`2283758` `c33e50a` `1cb0579` `fbda3b9` `5714a63`
+  `33a200e` `dd72c24`
+- W3 只读报告（3）：`9459350`（feat）+ `4eea11f`（test）+ `9670b3f`（docs）
+- 清理与日志（3）：`5b2d49f` `20240b2` `8b2fc07`
+- W4~W7（3）：`deb9b9b`（feat）+ `96596a3`（test）+ `e91ec2e`（docs）
+- W8 证据（2）：`dc32cc4`（test）+ 本 docs commit
+
+**五项 Go**：
+
+1. 本地 `pytest -q` 288 passed；干净 venv 五包 282 passed, 1 skipped
+   （skip 仍是 `test_pet_window_mouth.py` 的 QApplication 用例）。
+2. fake 端到端节点：`test_aig_end_to_end_fake_candidate_to_manifest`、
+   `test_aig_selected_candidates_validate_and_readback`、
+   `test_aig_commit_is_changeset_only`。
+3. Agent 不可用：`test_agent_failure_keeps_pet_idle_and_not_black`、
+   `test_agent_rejects_bad_output_and_timeout`、
+   `test_agent_disabled_makes_no_process`；失败只清 `_chat_streaming`，
+   不写 `arbiter.request`、不动 `_render_rgba` / `self.base`。
+4. 保护 7 项自 `7531ff3` 零 diff；无权重；`test_aig_no_weights_no_new_deps`。
+5. 工作树仅 `?? docs/images/`；`origin/main` 仍 `7531ff3`。
+
+**失败矩阵节点**：缺 key `test_aig_missing_key_fails_before_network` /
+`test_missing_key_blocks_before_network`；断网 / 429 / 5xx / 超时
+`test_http_provider_network_failures` 与
+`test_aig_failure_matrix_returns_to_manual[429|500|timeout]`；乱码
+`[garbage]` + `test_parse_json_content_accepts_fence_and_rejects_garbage`；
+尺寸不符 `test_load_size_mismatch_returns_none`；全透明
+`test_load_all_transparent_returns_none`；路径越界
+`test_aig_path_guard_rejects_parent_absolute_manifest` +
+`test_memory_sku_guard_blocks_path_escape`；写盘失败
+`test_write_failure_rolls_back` + `test_rollback_on_write_failure` +
+`test_aig_failure_leaves_no_half_sku`；用户否决
+`test_veto_and_empty_changeset_leave_bytes_equal`。
+
+**三处口径**：memory 在 `~/.config/desktop_pet/memory/`，不走
+`commit_changes()`、不写 assets；`voice_io.py` 只 import 标准库
+（`shlex` / `shutil` / `subprocess`），默认关；`mood_hint` 只接受
+`MOOD_KEYS`，未知值由 `clamp()` 丢弃，记忆注入 system prompt
+但 emotion 仍由七态 `clamp()` 管住、不进 `derive_allowed()`。
+
+新节点 19 个（`test_agent_*` 13 + `test_cut_quality` 5 +
+`test_new_overlay_keys_render_without_new_states` 1）。

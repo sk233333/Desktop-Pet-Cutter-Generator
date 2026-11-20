@@ -31,6 +31,10 @@ AI 只给**几何参数**，不自由发明状态名。表情首期只开放 `jo
 - 密钥优先级：环境变量 `key_env` > `api_key`；环境变量便于 CI / 临时覆盖。
   密钥只存本地 gitignored 文件，不打日志、不下发。
 - 默认零网络：只有点按钮才构造请求；缺任一前置项直接失败，参数不动。
+- 封闭覆盖层键（2026-11-20 扩到五键）：`joy / sleepy / angry / sad / shy`
+  只决定渲染取图；基态绑定 `smile→(joy,shy)`、`half→(sleepy,sad)`、
+  `surprise→angry`。`surprise→angry` 是刻意美术口径：惊讶的圆眼复用
+  angry 眉毛，不为「怒」单开状态名。
 - 主界面已不提供 AI 切割入口（2026-11-20 移除）：图片组只保留「手动框选」，
   框内像素由 SAM/GrabCut 完成；视觉模型不再参与主界面抠图，图片不上传。
 - `ai_cut_box.py`、`_AICutPromptDialog`、`_ai_cut_flow`、`ck_outline`、
