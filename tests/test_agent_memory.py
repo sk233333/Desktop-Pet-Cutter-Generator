@@ -117,6 +117,22 @@ def test_agent_surface_goes_through_stream_chat(monkeypatch):
     assert json.loads("".join(chunks)) == {"text": "你好"}
 
 
+def test_agent_failure_keeps_pet_idle_and_not_black():
+    """Go ③：Agent 崩了 / 不可用只清流式标记，不写表情、不动底图。"""
+    src = (ROOT / "desktop_pet" / "pet_window.py").read_text(encoding="utf-8")
+    start = src.index("    def _chat_on_failed(self):")
+    end = src.index("    def _chat_on_finished(self):", start)
+    body = src[start:end]
+    assert "_chat_streaming = False" in body
+    assert "arbiter.request" not in body
+    assert "_render_rgba" not in body and "_expr_frame" not in body
+    assert "self.base" not in body
+
+    worker = (ROOT / "desktop_pet" / "chat_worker.py").read_text(encoding="utf-8")
+    assert "self.failed.emit()" in worker
+    assert "except Exception:" in worker
+
+
 # ---------------------------------------------------------------- 语义提示
 def test_clamp_keeps_closed_mood_hint_only():
     allowed = {"emotion": ["normal", "smile"], "action": []}
