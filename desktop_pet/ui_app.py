@@ -42,7 +42,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication,
                              QGraphicsSimpleTextItem, QGraphicsView, QGroupBox,
                              QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                              QLineEdit, QMessageBox, QPlainTextEdit,
-                             QProgressBar, QPushButton, QRadioButton,
+                             QProgressBar, QPushButton,
                              QScrollArea,
                              QSizePolicy, QSlider, QSpinBox, QStackedWidget, QStyle,
                              QStyleOptionButton, QTableWidget, QTableWidgetItem,
@@ -1095,93 +1095,6 @@ class _AIMotionDialog(QDialog):
         if not self.selected:
             QMessageBox.information(self, "AI 生成参数", "至少勾选一项")
             return
-        self.accept()
-
-
-class _AICutPromptDialog(QDialog):
-    """AI 抠图前问「要切成什么」；跳过 = 按画面主体切。"""
-
-    def __init__(self, parent=None, initial_outline=True, upload=False):
-        super().__init__(parent)
-        self.result_text = None          # None=取消；""=跳过
-        self.subject_text = ""
-        self.outline = bool(initial_outline)
-        self._manual_outline = False
-        self.upload = bool(upload)
-        self.setWindowTitle("AI 识别抠图")
-        lay = QVBoxLayout(self)
-        lay.setSpacing(10)
-
-        head = QLabel("要切成什么？")
-        f = QFont()
-        f.setPointSize(13)
-        f.setBold(True)
-        head.setFont(f)
-        lay.addWidget(head)
-
-        tip = QLabel(
-            "描述要保留的主体（如「中间的兔子」），会随图片发送给模型；"
-            "返回的框仍可在预览里确认。"
-            if self.upload else
-            "描述要保留的主体（如「中间的兔子」），只用于提示你框选，"
-            "不会上传；切割由框和下面的黑边选项决定。")
-        tip.setWordWrap(True)
-        tip.setStyleSheet("color:#8d99a8;")
-        lay.addWidget(tip)
-
-        self.ed = QPlainTextEdit()
-        self.ed.setPlaceholderText("例如：只保留中间的兔子")
-        self.ed.setFixedHeight(90)
-        self.ed.textChanged.connect(self._sync_outline)
-        lay.addWidget(self.ed)
-
-        self.ck_outline = QCheckBox("贴内层黑边（去掉外层白边/贴纸边）")
-        self.ck_outline.setToolTip(
-            "沿主体内部的黑色描边填满，去掉外面的白色贴纸边；"
-            "没有黑边时会自动回退到 SAM/GrabCut")
-        self.ck_outline.setChecked(self.outline)
-        self.ck_outline.clicked.connect(self._mark_manual)
-        lay.addWidget(self.ck_outline)
-
-        btns = QHBoxLayout()
-        skip = QPushButton("跳过（直接框选）")
-        skip.clicked.connect(self._skip)
-        btns.addWidget(skip)
-        btns.addStretch(1)
-        cancel = QPushButton("取消")
-        cancel.clicked.connect(self.reject)
-        btns.addWidget(cancel)
-        ok = QPushButton("开始框选")
-        ok.setObjectName("primary")
-        ok.clicked.connect(self._accept)
-        btns.addWidget(ok)
-        lay.addLayout(btns)
-        self.resize(560, 340)
-
-    def _mark_manual(self, *_):
-        self._manual_outline = True
-
-    def _sync_outline(self):
-        """描述里出现「白边/黑边/描边」时自动勾选；用户手动改过就不抢。"""
-        if self._manual_outline:
-            return
-        from ai_cut_box import split_edge_instruction
-        _, wants = split_edge_instruction(self.ed.toPlainText())
-        if wants:
-            self.ck_outline.setChecked(True)
-
-    def _skip(self):
-        self.result_text = ""
-        self.subject_text = ""
-        self.outline = self.ck_outline.isChecked()
-        self.accept()
-
-    def _accept(self):
-        from ai_cut_box import split_edge_instruction
-        subject, _ = split_edge_instruction(self.ed.toPlainText())
-        self.subject_text = subject
-        self.outline = self.ck_outline.isChecked()
-        self.result_text = subject
         self.accept()
 
 
@@ -3649,37 +3562,6 @@ class LaunchUI(QWidget):
             "background:#fbfeff;border:2px dashed #dbe9f7;border-radius:16px;"
             "color:#aab6c4;")
         v.addWidget(self.lbl_thumb)
-        # 抠图方式：默认手动；AI 只替换「框取」，后续标注完全共用
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-        mode_row.addWidget(QLabel("抠图方式"))
-        self.rb_cut_manual = QRadioButton("手动框选")
-        self.rb_cut_ai = QRadioButton("AI 切割（框手动）")
-        self.rb_cut_manual.setChecked(True)
-        self.rb_cut_ai.setToolTip(
-            "框仍由你手动画，SAM/GrabCut 只负责框内像素切割；"
-            "AI 不再猜框，也不会把图片发给模型接口")
-        for rb in (self.rb_cut_manual, self.rb_cut_ai):
-            rb.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            rb.toggled.connect(self._sync_cut_mode)
-            mode_row.addWidget(rb)
-        self.ck_outline = QCheckBox("贴内层黑边")
-        self.ck_outline.setToolTip(
-            "AI 切割时沿主体内层黑色描边填充，去掉外层白边；"
-            "没有黑边会自动回退到 SAM/GrabCut")
-        self.ck_outline.setChecked(True)
-        self.ck_outline.setEnabled(False)
-        mode_row.addWidget(self.ck_outline)
-        self.ck_text_guide = QCheckBox("文本引导（会上传图片）")
-        self.ck_text_guide.setToolTip(
-            "实验：把原图和描述发给模型取框，失败自动回手动；"
-            "默认关，勾选即表示同意上传当前图片")
-        self.ck_text_guide.setChecked(False)
-        self.ck_text_guide.setEnabled(False)
-        self.ck_text_guide.toggled.connect(self._sync_cut_mode)
-        mode_row.addWidget(self.ck_text_guide)
-        mode_row.addStretch(1)
-        v.addLayout(mode_row)
         right.addWidget(g_img)
 
         # 输出参数搬进齿轮「设置」，主界面右侧只留步骤与选项
@@ -3923,7 +3805,7 @@ class LaunchUI(QWidget):
         self.btn_start.setObjectName("primary")
         self.btn_start.setMinimumHeight(36)
         self.btn_start.clicked.connect(self._start)
-        self._sync_cut_mode()
+        self.btn_start.setToolTip("框取手办并抠图")
 
         self.ck_launch = CuteCheckBox("生成后启动桌宠")
         self.ck_launch.setChecked(True)
@@ -5787,10 +5669,6 @@ class LaunchUI(QWidget):
         """跑任务时禁用按钮；抠图完成后才放开选做步骤与生成。"""
         cut = self._cut is not None
         self.btn_start.setEnabled(not busy)
-        self.rb_cut_manual.setEnabled(not busy)
-        self.rb_cut_ai.setEnabled(not busy)
-        self.ck_outline.setEnabled(not busy and self.rb_cut_ai.isChecked())
-        self.ck_text_guide.setEnabled(not busy and self.rb_cut_ai.isChecked())
         for b in (self.btn_eyes, self.btn_sway):
             b.setEnabled(not busy and cut)
         self.btn_table.setEnabled(not busy and cut)
@@ -5814,163 +5692,20 @@ class LaunchUI(QWidget):
                 800, lambda: None if self._progress_running else p.setVisible(False))
 
     def _start(self):
-        """第一步（必做）：手动框取或 AI 识别框取，结果都落到同一份剪切结果。"""
+        """第一步（必做）：手动框取手办，结果落到剪切结果。"""
         if not self._image_path:
             self._log("[提示] 请先选择图片")
             return
         self.log.clear()
-        if self.rb_cut_ai.isChecked():
-            if self.ck_text_guide.isChecked():
-                # 实验入口：勾选即同意上传；失败回手动框选
-                self._run_task(self._ai_cut_flow)
-            else:
-                # 默认：框由人定，AI 只做框内切割（SAM/GrabCut）
-                self._run_task(lambda: self._cut_flow(auto_seg=True))
-        else:
-            self._run_task(self._cut_flow)
-
-    def _sync_cut_mode(self, *_):
-        """切换抠图方式：只改主按钮文案，不动后续标注流程。"""
-        if not hasattr(self, "btn_start"):
-            return
-        if hasattr(self, "ck_outline"):
-            self.ck_outline.setEnabled(self.rb_cut_ai.isChecked())
-        if hasattr(self, "ck_text_guide"):
-            self.ck_text_guide.setEnabled(self.rb_cut_ai.isChecked())
-        if self.rb_cut_ai.isChecked():
-            if self.ck_text_guide.isChecked():
-                self.btn_start.setText("开始处理（文本引导，图片会上传）")
-                self.btn_start.setToolTip(
-                    "描述和原图会发送到模型取框；失败自动回手动框选")
-            else:
-                self.btn_start.setText("开始处理（手动框选 + AI 切割）")
-                self.btn_start.setToolTip(
-                    "先手动框住主体，再由 SAM/GrabCut 自动切割；"
-                    "可勾选「贴内层黑边」去掉外层白边")
-        else:
-            self.btn_start.setText("开始处理（框取手办并抠图）")
-            self.btn_start.setToolTip("框取手办并抠图")
-
-    def _ai_cut_flow(self):
-        """AI 识别抠图：视觉模型给前景框，像素级掩膜仍由本地精修。"""
-        from ai_cut_box import detect_box, outline_mask, to_pixel_box
-        from ai_motion_contract import AIGenError, load_config, validate_config
-
-        path = self._image_path
-        sku = launch.safe_stem(self.ed_sku.text().strip() or "custom")
-        stem = launch.safe_stem(self.ed_name.text().strip()
-                                or (Path(path).stem + "_pet"))
-        source_dir = DEFAULT_CANON / sku
-        out_dir = DEFAULT_OUT / sku
-        source_dir.mkdir(parents=True, exist_ok=True)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        self._out_dir = out_dir
-        self.btn_build.setToolTip("保存素材并启动桌宠（PNG / WebP / manifest）")
-
-        def fallback(msg: str):
-            self._log(f"[AI] {msg}；已改手动框选")
-            self.rb_cut_manual.setChecked(True)
-            return self._cut_flow()
-
-        self._step("第 1 步 · 读图")
-        print("[AI 1/3] 读图")
-        im = Image.open(path)
-        rgba = np.array(self._rotated_rgba(im))
-        rgb = rgba[..., :3].copy()
-        has_alpha = int(rgba[..., 3].min()) < 250
-        self.canvas.set_image(rgb)
-
-        if has_alpha:
-            print("[AI 2/3] 原图自带 alpha，直接用透明通道")
-            alpha = rgba[..., 3].astype(np.float32) / 255.0
-            mask = (alpha > 0.5).astype(np.uint8)
-        else:
-            cfg = load_config()
-            issues = validate_config(cfg)
-            if issues:
-                return fallback("；".join(issues))
-            dlg = _AICutPromptDialog(
-                self, initial_outline=self.ck_outline.isChecked(), upload=True)
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                raise Cancelled()
-            instruction = dlg.subject_text or ""
-            outline = bool(dlg.outline)
-            self.ck_outline.setChecked(outline)
-            if not instruction:
-                return fallback("未填写文本引导描述")
-            self._step("第 2 步 · AI 识别主体…",
-                       "贴内层黑边" if outline
-                       else "图片和描述会发送到模型接口；只取前景框，抠图仍在本机")
-            print("[AI 2/3] 视觉模型识别前景框（图片会上传）")
-            try:
-                nbox = detect_box(cfg, Path(path).read_bytes(),
-                                  rgb.shape[1], rgb.shape[0],
-                                  instruction=instruction)
-                box = to_pixel_box(nbox, rgb.shape[1], rgb.shape[0])
-            except AIGenError as exc:
-                return fallback(str(exc))
-            print(f"    AI 框 {box}")
-            if outline:
-                self._step("沿黑色描边填充…", "正在贴合主体内层黑边，去掉外层白边")
-                try:
-                    mask = outline_mask(rgb, box)
-                    print(f"    贴黑边掩膜覆盖率 {mask.mean() * 100:.1f}%")
-                except AIGenError as exc:
-                    self._log(f"[AI] {exc}；改用自动分割")
-                    mask = launch.estimate_mask(
-                        rgb, rgba, has_alpha, box, None, None,
-                        self.cb_engine.currentText(),
-                        self.cb_device.currentText(), {})
-            else:
-                self._step("计算掩膜…", "正在按 AI 框估计前景掩膜，请稍候")
-                mask = launch.estimate_mask(
-                    rgb, rgba, has_alpha, box, None, None,
-                    self.cb_engine.currentText(), self.cb_device.currentText(), {})
-            if mask.mean() < 0.005:
-                # SAM 偶尔会给一个“分数最高但极小”的局部（如 0.2%）。
-                # 这种结果直接保存就是一张几乎全空的图，改用整图重估。
-                print(f"    掩膜只有 {mask.mean() * 100:.1f}%，"
-                      "判定为异常，改用整图 GrabCut/白底阈值")
-                self._step("重新估计掩膜…", "SAM 结果过小，改用整图分割")
-                mask = launch.estimate_mask(
-                    rgb, rgba, has_alpha,
-                    (0, 0, rgb.shape[1], rgb.shape[0]), None, None,
-                    "grabcut", self.cb_device.currentText(), {})
-                if mask.mean() < 0.005:
-                    return fallback("SAM 与 GrabCut 都没有得到有效掩膜")
-            print(f"    掩膜覆盖率 {mask.mean() * 100:.1f}%")
-
-        if mask.mean() <= 0:
-            return fallback("结果全透明")
-
-        h, w = rgb.shape[:2]
-        self._cut = {"path": path, "sku": sku, "stem": stem,
-                     "source_dir": source_dir, "out_dir": out_dir,
-                     "rgb": rgb, "rgba": rgba, "has_alpha": has_alpha,
-                     "box": (0, 0, w, h), "mask": mask, "pts": [],
-                     "cache": {}, "sockets": [], "levels": [],
-                     "hair": [], "cloth": []}
-        self._hl_mask = None
-        self._sync_sway_table()
-        self._save_source()
-        self._show_cutout(show_mask=True, show_board=True)
-        act = self._run_preview(self._frames_cut(), "AI 抠图结果预览",
-                                back=None, ok="保存 (s)", sharpen=True)
-        if act != "ok":
-            raise Cancelled()
-        self._save_source()
+        self._run_task(self._cut_flow)
 
     def _require(self, value):
         if value is None:
             raise Cancelled()
         return value
 
-    def _cut_flow(self, auto_seg: bool = False):
-        """必做步骤：读图 → 框取 →（可跳过补点）→ 抠图。
-
-        ``auto_seg=True``（界面上的「手动框选 + AI 切割」）只跳过补点：
-        框仍由人画，掩膜交给 SAM/GrabCut。
-        """
+    def _cut_flow(self):
+        """必做步骤：读图 → 框取 →（可跳过补点）→ 抠图。"""
         path = self._image_path
         sku = launch.safe_stem(self.ed_sku.text().strip() or "custom")
         stem = launch.safe_stem(self.ed_name.text().strip()
@@ -5992,22 +5727,12 @@ class LaunchUI(QWidget):
         print(f"    尺寸 {rgb.shape[1]}×{rgb.shape[0]}"
               + ("  含 alpha，直接用透明通道" if has_alpha else ""))
 
-        target = ""
-        if auto_seg and not has_alpha:
-            dlg = _AICutPromptDialog(
-                self, initial_outline=self.ck_outline.isChecked())
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                raise Cancelled()
-            target = dlg.subject_text
-            self.ck_outline.setChecked(dlg.outline)
-
         # ---- 框取 → 确认框大小 → 只保留框内画面 ----
         while True:
             # 回退重框时也要回到整图，不能在裁切图上再画框
             self.canvas.set_image(rgb)
             self._step("第 1 步 · 框取手办",
-                       (f"请框住：{target}；" if target else "")
-                       + "拖拽或左键点两个对角圈住手办；回车确认"
+                       "拖拽或左键点两个对角圈住手办；回车确认"
                        "（r 重框 / u 撤销 / f 整图 / ESC 取消）")
             print("[2/3] 框取手办")
             box = self._require(self._run_phase(
@@ -6033,59 +5758,6 @@ class LaunchUI(QWidget):
             if act is None:
                 raise Cancelled()
             # back → 重新框取
-
-        if auto_seg:
-            # 框由人定，AI 只做框内切割：把原始框交给 SAM/GrabCut，
-            # 再把掩膜裁回框内（不能先裁图再传整图框，否则 SAM 拿不到框提示）
-            from ai_cut_box import outline_mask
-            from ai_motion_contract import AIGenError
-
-            self._step("AI 切割…", "正在按手动框估计前景掩膜，请稍候")
-            cache: dict = {}
-            if self.ck_outline.isChecked():
-                try:
-                    mask_full = outline_mask(rgb, box)
-                    print(f"    贴黑边掩膜覆盖率 {mask_full.mean() * 100:.1f}%")
-                except AIGenError as exc:
-                    self._log(f"[AI] {exc}；改用自动分割")
-                    mask_full = launch.estimate_mask(
-                        rgb, rgba, has_alpha, box, None, None,
-                        self.cb_engine.currentText(),
-                        self.cb_device.currentText(), cache)
-            else:
-                mask_full = launch.estimate_mask(
-                    rgb, rgba, has_alpha, box, None, None,
-                    self.cb_engine.currentText(),
-                    self.cb_device.currentText(), cache)
-            if mask_full.mean() < 0.005:
-                print(f"    掩膜只有 {mask_full.mean() * 100:.1f}%，"
-                      "判定为异常，改用整图重估")
-                mask_full = launch.estimate_mask(
-                    rgb, rgba, has_alpha,
-                    (0, 0, rgb.shape[1], rgb.shape[0]), None, None,
-                    "grabcut", self.cb_device.currentText(), cache)
-                if mask_full.mean() < 0.005:
-                    self._log("[AI] 没有得到有效掩膜；请换手动框选或补点")
-                    raise Cancelled()
-            mask = np.ascontiguousarray(mask_full[y0:y1, x0:x1])
-            h, w = crop_rgb.shape[:2]
-            self._cut = {"path": path, "sku": sku, "stem": stem,
-                         "source_dir": source_dir, "out_dir": out_dir,
-                         "rgb": crop_rgb, "rgba": crop_rgba,
-                         "has_alpha": has_alpha, "box": (0, 0, w, h),
-                         "mask": mask, "pts": [], "cache": cache,
-                         "sockets": [], "levels": [], "hair": [], "cloth": []}
-            self._hl_mask = None
-            self._sync_sway_table()
-            self._save_source()
-            self._show_cutout(show_mask=True, show_board=True)
-            title = f"AI 切割结果预览 · {target}" if target else "AI 切割结果预览"
-            act = self._run_preview(self._frames_cut(), title,
-                                    back=None, ok="保存 (s)", sharpen=True)
-            if act != "ok":
-                raise Cancelled()
-            self._save_source()
-            return
 
         # 之后所有步骤都只看框内画面（补点/眼眶/发缕坐标也都在这个裁切里）
         rgb, rgba = crop_rgb, crop_rgba

@@ -492,19 +492,8 @@ def test_overlay_keys_do_not_rebuild_alias():
     assert "apply(self._render_rgba, state)" in src
 
 
-def test_text_guide_is_opt_in_and_logs_no_source_name():
-    """文本引导默认关，勾选即同意上传；日志不打原图名。"""
-    ui = (ROOT / "desktop_pet" / "ui_app.py").read_text(encoding="utf-8")
-    assert 'QCheckBox("文本引导（会上传图片）")' in ui
-    assert "self.ck_text_guide.isChecked()" in ui
-    ai = ui[ui.index("def _ai_cut_flow"):ui.index("def _require")]
-    assert "Path(path).name" not in ai
-    assert "upload=True" in ai
-    assert "未填写文本引导描述" in ai
-
-
 def test_ai_cut_source_path_is_shared_and_commit_free(tmp_path):
-    """手动 / AI 切割共用源图落盘；只写两个源文件，不碰 manifest。"""
+    """手动切割源图落盘；只写两个源文件，不碰 manifest。"""
     import inspect
     from launch import save_cut_source
 
