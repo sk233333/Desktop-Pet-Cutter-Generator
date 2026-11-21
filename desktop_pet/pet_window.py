@@ -315,6 +315,10 @@ class PetWindow(QWidget):
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
         self._bubble_timer.timeout.connect(self._hide_bubble)
+        self._token_lbl = None
+        self._token_timer = QTimer(self)
+        self._token_timer.setSingleShot(True)
+        self._token_timer.timeout.connect(self._hide_token_stats)
         try:
             self.actions = ActionBridge.for_asset(
                 asset, _ExprPort(self.arbiter, lambda: self.expr_enabled), self)
@@ -1388,6 +1392,35 @@ class PetWindow(QWidget):
         self._chat_bubble_text = ""
         self._last_bubble = ""
         self.arbiter.request("interaction", "bubble", "", 0)
+
+    def show_token_stats(self, stats: dict, hold_ms: int = 8000):
+        """头顶浮层：只显 TTFT / 前 5s / 全程估算，不露 URL、key、图名。"""
+        if not isinstance(stats, dict):
+            return
+        ttft = max(0, int(stats.get("ttft_ms") or 0))
+        first5 = max(0, int(stats.get("first5s") or 0))
+        total = max(0, int(stats.get("total") or 0))
+        if self._token_lbl is None:
+            lbl = QLabel(self)
+            lbl.setStyleSheet(
+                "QLabel{background:rgba(255,255,255,225);color:#6b7a8c;"
+                "border:1px solid #e3ecf9;border-radius:8px;"
+                "padding:2px 6px;font-size:10px;}")
+            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                             True)
+            self._token_lbl = lbl
+        lbl = self._token_lbl
+        head = f"{ttft / 1000:.1f}s" if ttft else "—"
+        lbl.setText(f"TTFT {head} · 5s≈{first5} · 总≈{total}（估算）")
+        lbl.adjustSize()
+        lbl.move(max(0, self.width() - lbl.width() - 4), 2)
+        lbl.show()
+        lbl.raise_()
+        self._token_timer.start(int(hold_ms))
+
+    def _hide_token_stats(self):
+        if self._token_lbl is not None:
+            self._token_lbl.hide()
 
     # ---------- 本地 MCP / 办公事件桥（默认关） ----------
     def build_mcp_host(self):

@@ -5456,12 +5456,105 @@ class LaunchUI(QWidget):
         save.setToolTip("只写 annotation_draft；不展开 parts、不自动判真眼")
         save.clicked.connect(lambda: self._save_annotate_draft(report, dlg))
         row.addWidget(save)
+        meeting = QPushButton("多角色开会评审")
+        meeting.setToolTip(
+            "默认关；在 ~/.config/desktop_pet/meeting.json 启用。"
+            "全同意也只标候选，保存仍需人工确认")
+        try:
+            from meeting import load_meeting_config, meeting_ready
+            meeting.setEnabled(meeting_ready(load_meeting_config()))
+        except Exception:
+            meeting.setEnabled(False)
+        meeting.clicked.connect(lambda: self._start_meeting_review(
+            report, dlg, te.toPlainText(), meeting))
+        row.addWidget(meeting)
         row.addStretch(1)
         btn = QPushButton("关闭")
         btn.clicked.connect(dlg.accept)
         row.addWidget(btn)
         v.addLayout(row)
         dlg.exec()
+
+    def _start_meeting_review(self, report, dlg, plan_text, btn):
+        """v0.3.2：配置期多角色评审；默认关，只读候选，不自动写盘。"""
+        try:
+            from chat_contract import load_agent_config
+            from meeting import load_meeting_config
+            from meeting_worker import MeetingWorker
+        except ImportError as exc:
+            QMessageBox.warning(self, "开会评审", f"评审模块不可用：{exc}")
+            return
+        btn.setEnabled(False)
+        btn.setText("评审中…")
+        self._meeting_worker = MeetingWorker(
+            load_agent_config(), plan_text, load_meeting_config(), parent=self)
+
+        def _done(res):
+            btn.setEnabled(True)
+            btn.setText("多角色开会评审")
+            self._show_meeting_result(res, report, dlg)
+
+        def _fail(msg):
+            btn.setEnabled(True)
+            btn.setText("多角色开会评审")
+            QMessageBox.warning(self, "开会评审", f"评审失败：{msg}")
+
+        self._meeting_worker.done.connect(_done)
+        self._meeting_worker.failed.connect(_fail)
+        self._meeting_worker.start()
+
+    @staticmethod
+    def _token_line(trace) -> str:
+        """只给数字与「估算」标注，不含 URL / key / 原图名。"""
+        trace = trace if isinstance(trace, dict) else {}
+        ttft = max(0, int(trace.get("ttft_ms") or 0))
+        head = f"{ttft / 1000:.1f}s" if ttft else "—"
+        first5 = max(0, int(trace.get("first5s") or 0))
+        total = max(0, int(trace.get("total") or 0))
+        return f"TTFT {head} · 5s≈{first5} · 总≈{total}（估算）"
+
+    def _show_meeting_result(self, result, report, dlg):
+        if not isinstance(result, dict):
+            QMessageBox.warning(self, "开会评审", "评审没有返回结果。")
+            return
+        status = str(result.get("status") or "")
+        reason = str(result.get("reason") or "")
+        if status == "disabled":
+            QMessageBox.information(
+                self, "开会评审",
+                "开会功能默认关闭。\n在 ~/.config/desktop_pet/meeting.json "
+                "启用并配置至少两个角色后再试。")
+            return
+        lines = []
+        ready = status == "ready_for_human_review"
+        lines.append(("全部同意（待人工确认）" if ready
+                      else "存在反对 / 未通过") + f" · {reason}")
+        for op in result.get("opinions") or []:
+            if not isinstance(op, dict):
+                continue
+            lines.append(
+                f"[第 {op.get('round')} 轮] {op.get('role')}："
+                f"{op.get('verdict')} — {op.get('reason')}")
+        trace = result.get("trace")
+        if isinstance(trace, dict):
+            lines.append(self._token_line(trace))
+            if getattr(self, "_pets", None):
+                try:
+                    self._pets[-1].show_token_stats(trace)
+                except Exception:
+                    pass
+        text = "\n".join(lines)
+        if not ready:
+            QMessageBox.information(
+                self, "开会评审",
+                text + "\n\n不会自动保存；请人工处理后重跑。")
+            return
+        ans = QMessageBox.question(
+            self, "开会评审",
+            text + "\n\n保存草案到 manifest？\n"
+            "只写 annotation_draft，仍不自动判真眼。")
+        if ans == QMessageBox.StandardButton.Yes:
+            self._save_annotate_draft(report, dlg)
 
     def _save_annotate_draft(self, report, dlg):
         """① 界面保存按钮：人工确认后只写可选草案字段。"""

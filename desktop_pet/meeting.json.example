@@ -1,0 +1,26 @@
+{
+  "_comment": "复制到 ~/.config/desktop_pet/meeting.json 再改；默认关。profile 对应 agent.json 的 profiles；chat 只覆盖本角色需要的字段，留空则用全局 chat。",
+  "enabled": false,
+  "max_rounds": 2,
+  "timeout_ms": 60000,
+  "roles": [
+    {
+      "name": "视觉",
+      "sku": "",
+      "profile": "openai_chat",
+      "chat": {"base_url": "", "model": "", "key_env": ""}
+    },
+    {
+      "name": "动作",
+      "sku": "",
+      "profile": "openai_chat",
+      "chat": {"base_url": "", "model": "", "key_env": ""}
+    }
+  ],
+  "devil": {
+    "name": "反方",
+    "sku": "",
+    "profile": "openai_chat",
+    "chat": {"base_url": "", "model": "", "key_env": ""}
+  }
+}
