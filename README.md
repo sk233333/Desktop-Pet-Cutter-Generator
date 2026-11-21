@@ -321,20 +321,24 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 - 模型 ID 与地址不写死；换模型只改配置，不改代码。
 - 多模型路由（v0.3.1，默认关）：`routing.enabled=true` 后按
   `routing.tasks.chat / vision / reasoning` 选 profile / model；空值回退
-  顶层 `provider` / `chat.model`。
+  顶层 `provider` / `chat.model`。视觉标注读 `vision.model`，
+  开会角色可设 `task=reasoning`。
 - 失败重试默认关：`chat.retry=0` 只跑一次；可设 1~2，已吐字后不再重试，
   避免气泡重复。
 - token / 费用默认不显示：`chat.usage_log=true` 时只在 stderr 打
-  `chat in≈N tok out≈M tok` 类别行，不含正文 / URL / key / 原图名。
+  `chat in≈N tok out≈M tok` 类别行，并累计到
+  `~/.config/desktop_pet/usage.json`（0600）；桌宠右键「用量统计…」可看。
+  不含正文 / URL / key / 原图名。
 - 系统钥匙串可选：环境变量优先；`chat.keyring=true` 才尝试可选 keyring，
-  `chat.key_file` 指定的文件在 POSIX 下必须是 0600。
+  `chat.key_file` 指定的文件在 POSIX 下必须是 0600。右键「密钥来源…」
+  只检查来源与可用性，不显示 key 内容。
 - 云办公默认关：右键「发送办公事件…」先检查 `cloud.enabled` / `consent` /
   https `base_url` / `key_env` 四项，未就绪只提示、不联网。
 - 多角色开会评审（v0.3.2，默认关）：复制
   `desktop_pet/meeting.json.example` 到 `~/.config/desktop_pet/meeting.json`
   并启用；角色顺序评审，全同意也只标「待人工确认」，任一反对 / 超时都标
-  冲突，不自动保存。头顶 token 浮层只显示 TTFT、前 5s 估算与全程累计，
-  并明确标注「估算」。
+  冲突，不自动保存。角色可用 `task=reasoning` 走推理模型；头顶 token 浮层
+  只显示 TTFT、前 5s 估算与全程累计，并明确标注「估算」。
 - 词表在窗口启动时从 `expr_state.STATES` + `ActionBridge.registry` +
   逐 SKU `effects.enabled` 反推一次，**不含 `blink`**；`smile` 已接线并进词表；
   改配置需重启生效。

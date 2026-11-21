@@ -2,6 +2,27 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## v0.3.3（R3 剩余收尾，未打 tag）
+
+### 行为变更
+
+- 视觉路由调用点：AI 标注报告在 `routing.enabled=true` 且
+  `routing.tasks.vision.model` 非空时，只把 `ai_motion.json` 的 model
+  换成该值；base_url / key 仍来自 `ai_motion.json`，不新增 host。
+- 推理路由调用点：开会角色可写 `"task": "reasoning"`，透传给
+  `stream_chat(task=...)`；无效值回退 `chat`。
+- 用量面板：`chat.usage_log=true` 时把类别累计原子写入
+  `~/.config/desktop_pet/usage.json`（0600）；桌宠右键「用量统计…」
+  读取展示。只存类别与估算，不含正文 / URL / key / 原图名。
+- 密钥来源检查：桌宠右键「密钥来源…」显示环境变量 / 钥匙串 / 0600 文件
+  的可用性与当前来源；只读，不显示 key 内容，不写配置。
+
+### 保护与依赖
+
+- 零新 Python 依赖；不改 schema / manifest / `_render_rgba` / `self.base`。
+- 保护 7 项自 `3c6e6d5` 零 diff；skip 仍 1 个模块。
+- 本批未打新 tag，按 R3 剩余收尾处理。
+
 ## v0.3.2（配置期多角色评审 / 开会）
 
 ### 行为变更

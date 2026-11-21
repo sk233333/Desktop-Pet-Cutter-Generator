@@ -115,7 +115,7 @@ git rev-parse --short origin/main                     # push 前期望 f4bf417
 | W4 | 更多表情/动作：`angry/sad/shy` 封闭候选；B-4 说话驱动嘴型切档单列 | 任意状态名 → normal；不注册 STATES；覆盖层键/别名断言；整帧重绘只写边界 | 动 STATES/别名表 → 单独边界文档 + 显式授权 |
 | W5 | 切割质量：alpha matting、阴影/白边识别、打分与自动重切、批量文件夹 | 打分不覆盖人工选择；重切可否决；批量只出 report、逐 SKU 点选后落盘；黑边断开回退口径不回退 | 批量 commit → 停（已否决） |
 | W6 | 独立 Agent + 按 SKU memory | Agent=触发源不是状态源，统一 `arbiter.request("interaction", ...)`；不塞 Qt 主线程；kill → 回 idle；memory 不走 `commit_changes`、tmp + `os.replace`、显式触发词、结构化、sku 守卫、warn 去重、不喂 `derive_allowed` | 加 `"agent": 2` / 第二状态源 / 权重回仓 → 停 |
-| W7 | 对话语音 + 工程增强 | agent.json → 情绪 → 表情；TTS/ASR 独立轮、默认关、不进 CI 五包；路由 `key_env` 占位、零 host；流式/重试默认关且「已吐字不重试」；费用只打类别；v0.3.1 已补多模型路由 / 重试开关 / 费用类别 / 可选钥匙串 + ①⑤ 接线 | 默认联网 / 静默轮询 / LLM 生成 Python 进 L3 → 停 |
+| W7 | 对话语音 + 工程增强 | agent.json → 情绪 → 表情；TTS/ASR 独立轮、默认关、不进 CI 五包；路由 `key_env` 占位、零 host；流式/重试默认关且「已吐字不重试」；费用只打类别；v0.3.1 已补多模型路由 / 重试开关 / 费用类别 / 可选钥匙串 + ①⑤ 接线；v0.3.3 补视觉/推理路由调用点、用量面板、密钥来源检查 | 默认联网 / 静默轮询 / LLM 生成 Python 进 L3 → 停 |
 | W8 | Go/No-Go → 一次性 push → v0.2 | §6 五项全绿；`git push origin main` 唯一一次；再打 annotated `v0.2` | 任一不绿 → 不 push |
 
 并行不占实现位：A 档人工（真素材人眼）。W2/W3/W5 的质量评测依赖它；

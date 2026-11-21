@@ -2,7 +2,8 @@
 
 > 本文件最初是 R1 边界文档；R2 已授权并落地，实施结果见 §10；
 > R3 工程增强与 v0.3 未接线补完见 §11（v0.3.1）；
-> 开会功能的边界与实现见 §12（v0.3.2，默认关）。
+> 开会功能的边界与实现见 §12（v0.3.2，默认关）；
+> R3 剩余收尾（视觉/推理路由调用点、用量面板、密钥来源）见 §13。
 > 基线：R1 结案 `f4bf417`（v0.2.2 之后的文档批）。
 > ① 授权改动 `manifest_io.py` / `manifest.schema.json`，已同 commit 重订哈希；
 > 其余保护项自 `f4bf417` 零 diff；`expr_state.py` 哈希 `c14c92c…` 不变。
@@ -571,3 +572,22 @@ tag：v0.3（annotated），v0.1~v0.2.2 不动
 超时在下次请求前硬停 · 反方角色必被问 · 每 SKU provider 只改请求副本 ·
 浮层只显数字与「估算」· 保护 7 项自 `44968f5` 零 diff · skip 仍 1 个模块 ·
 fake provider 端到端（不连真实 API / 权重）。
+
+## 13. R3 剩余收尾（基线 3c6e6d5，无新 tag 批次）
+
+本批按「feat / test / docs 三段 + 一次 push」走，不新增版本 tag。
+
+| 项 | 已接线 | 默认 / 边界 |
+|---|---|---|
+| 视觉路由调用点 | `ai_annotate.routed_config()`：`routing.tasks.vision.model` 覆盖 `ai_motion.json` 的 model | `routing.enabled` 默认关；base_url / key 仍用 `ai_motion.json`，不新增 host |
+| 推理路由调用点 | `meeting` 角色可写 `"task": "reasoning"`，透传给 `stream_chat(task=...)` | 角色默认 `chat`；无效值回退 `chat` |
+| 费用面板 | `usage_meter` 类别账本 → 桌宠右键「用量统计…」 | `chat.usage_log` 默认关；账本 `~/.config/desktop_pet/usage.json`，0600、原子写、只存类别与估算 |
+| 钥匙串 UI | `secrets_store.key_source_report()` → 桌宠右键「密钥来源…」 | 只读检查；只显示来源与可用性，不显示 key 内容，不写配置 |
+
+- 零新 Python 依赖；`meeting` / `usage_meter` / `secrets_store` / `model_router`
+  仍 Qt-free；只有菜单与展示在 `pet_window` / `ui_app`。
+- 保护 7 项自 `3c6e6d5` 零 diff；不改 schema / manifest / `_render_rgba` /
+  `self.base`。
+- 浮层与两个菜单的显示仍归 GUI import / offscreen 冒烟，不做像素级断言；
+  pytest 覆盖纯逻辑、文件权限与源码接线。
+- 未打 `v0.3.3` tag：本批按 R3 剩余收尾处理，版本号留在需要时再定。
