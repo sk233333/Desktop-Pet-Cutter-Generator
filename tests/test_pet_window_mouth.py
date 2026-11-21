@@ -233,6 +233,83 @@ def test_mcp_notify_lands_only_on_arbiter(tmp_path):
         w.close()
 
 
+def test_five_overlay_keys_load_and_render_at_runtime(tmp_path):
+    """五键都进运行时 overlays，且各自能产生可见像素；STATES 零改动。"""
+    from PIL import Image
+    from expr_state import STATES
+
+    d, asset, item, _ = make_sku(tmp_path, mouth=False)
+    h, w = asset.rgba.shape[:2]
+    colors = {
+        "joy": (255, 0, 0),
+        "sleepy": (0, 255, 0),
+        "angry": (0, 0, 255),
+        "sad": (255, 255, 0),
+        "shy": (255, 0, 255),
+    }
+    item["expr_overlays"] = {}
+    for i, (key, color) in enumerate(colors.items()):
+        name = f"pet_{key}.png"
+        ov = np.zeros((h, w, 4), np.uint8)
+        y0 = int(h * (0.10 + 0.12 * i))
+        ov[y0:y0 + 6, :] = (*color, 255)
+        Image.fromarray(ov, "RGBA").save(d / name)
+        item["expr_overlays"][key] = {"overlay": name}
+
+    w0 = win(asset, item)
+    try:
+        assert set(w0._expr_overlays) == set(colors)
+        for key, color in colors.items():
+            got = w0._expr_overlays[key].apply(w0._render_rgba)
+            assert np.any(np.all(got[..., :3] == color, axis=-1)), key
+        assert STATES == ("normal", "blink", "half", "surprise", "wink_l",
+                          "wink_r", "smile")
+    finally:
+        w0.close()
+
+
+def test_v03_expr_frames_switch_without_recompose(tmp_path):
+    """中间帧只在首次取图时合成；之后切索引不再调用 apply。"""
+    from PIL import Image
+
+    d, asset, item, _ = make_sku(tmp_path, mouth=False)
+    h, w = asset.rgba.shape[:2]
+    for name, color, y0 in (("pet_f0.png", (255, 0, 0), 10),
+                            ("pet_f1.png", (0, 255, 0), 20)):
+        ov = np.zeros((h, w, 4), np.uint8)
+        ov[y0:y0 + 6, :] = (*color, 255)
+        Image.fromarray(ov, "RGBA").save(d / name)
+    item["expr_frames"] = {"smile": [
+        {"file": "pet_f0.png", "hold_ms": 100},
+        {"file": "pet_f1.png", "hold_ms": 100},
+    ]}
+    w0 = win(asset, item)
+    try:
+        assert set(w0._expr_frames) == {"smile"}
+        calls = {"n": 0}
+        for ov, _ in w0._expr_frames["smile"]:
+            orig = ov.apply
+
+            def counted(base, _orig=orig):
+                calls["n"] += 1
+                return _orig(base)
+
+            ov.apply = counted
+
+        w0.elapsed = 0.05
+        first, _ = w0._expr_frame("smile")
+        w0.elapsed = 0.15
+        second, _ = w0._expr_frame("smile")
+        assert calls["n"] == 2
+        assert not np.array_equal(first, second)
+        for i in range(20):
+            w0.elapsed = 0.05 + (i % 2) * 0.1
+            w0._expr_frame("smile")
+        assert calls["n"] == 2, "切索引不得重新合成"
+    finally:
+        w0.close()
+
+
 def test_tm4_zero_writes_and_200_frames(tmp_path):
     """GUI 专属：真实帧循环跑 200 帧；Qt-free 的文件哈希版在
     `tests/test_mouth_runtime_ci.py::test_cm5_apply_200_frames_zero_writes`。

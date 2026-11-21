@@ -27,8 +27,13 @@ from ai_generate_contract import (AIGenCandidate, AIGenConfig,  # noqa: E402
 from ai_generate_provider import (FakeProvider, HttpAIProvider,  # noqa: E402
                                   LocalMattingProvider)
 
-BASE_COMMIT = "7531ff3"
+BASE_COMMIT = "06008c9"         # v0.3 起点（M1）
 TAG_COMMIT = "b03cdb7"          # tag v0.1 不得移动
+# v0.3 ① 显式授权：manifest_io / schema 同 commit 重订哈希，其余保护项不变。
+AUTHORIZED = {
+    "desktop_pet/manifest_io.py",
+    "desktop_pet/manifest.schema.json",
+}
 # v0.2 基线：expr_state.py 重新归零字节保护（joy/sleepy 只做覆盖层键）。
 PROTECTED = (
     "desktop_pet/anim.py",
@@ -241,10 +246,12 @@ def test_aig_state_table_and_protected_files_unchanged():
     diff = _git("diff", "--name-only", BASE_COMMIT, "HEAD", "--",
                 *PROTECTED, ".github/workflows/")
     assert diff.returncode == 0
-    assert diff.stdout.strip() == "", f"保护文件出现 diff：{diff.stdout}"
+    changed = set(diff.stdout.split())
+    assert changed <= AUTHORIZED, f"保护文件出现未授权 diff：{changed - AUTHORIZED}"
 
     dirty = _git("status", "--porcelain", "--", *PROTECTED, ".github/workflows/")
-    assert dirty.stdout.strip() == "", f"保护文件被改：{dirty.stdout}"
+    dirty_files = {ln[3:].strip() for ln in dirty.stdout.splitlines() if ln.strip()}
+    assert dirty_files <= AUTHORIZED, f"保护文件被改：{dirty_files - AUTHORIZED}"
 
     tag = _git("rev-parse", "--short", "v0.1^{commit}")
     if tag.returncode == 0:

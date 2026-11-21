@@ -521,8 +521,9 @@ _PROTECTED_SHA256 = {
     "arbiter.py": "08d812e95dc46d01e3f31d02fb72bb8b15a7bd7fb6cb02539fda8b3c35a0497d",
     # 新基线（7531ff3）：expr_state.py 恢复零字节保护，joy/sleepy 只做覆盖层
     "expr_state.py": "ca4e6ee9ab087474b901c35712a09545657a52061395b65e618729fe4b7ba638",
-    "manifest_io.py": "6353734dd357b5495fb092bddde1d9d46ecb51f4aa07aec3f63f35f5fa7b81c3",
-    "manifest.schema.json": "bfdffce4013b100bca041b553b77555e91657fbbab2d4af91b42ff408cfa7021",
+    # v0.3 ①：授权新增 annotation_draft / expr_frames 两个可选字段后重订
+    "manifest_io.py": "7f412d175eb5d95f68f387351757d8814b92c26b63c9485ee9e27ff54e3459b9",
+    "manifest.schema.json": "216f0099bb7ecdb64ab5a8fe033067dc5ec33133c9e5e7a8c1598c42e74b8de4",
     "effect_table.json": "1b4c293778c5c59fd72e435f7f5cd438207c028d1bb23c42abf3ebadff6eb983",
 }
 _WORKFLOW_SHA256 = "2f1b3cd6b663b87cf373386ec417e92385e342baf08995e908774bf2c3314b3a"

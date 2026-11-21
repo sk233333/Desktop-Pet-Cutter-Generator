@@ -383,8 +383,12 @@ def test_changeset_only_writes_selected(tmp_path):
     assert img.shape == (H, W, 4) and (img[..., 3] > 0).any()
 
 
-def test_new_overlay_keys_render_without_new_states(tmp_path):
-    """angry/sad/shy 是封闭覆盖层键：能出图，但不进 STATES / 词表。"""
+def test_new_overlay_keys_generate_without_new_states(tmp_path):
+    """angry/sad/shy 是封闭覆盖层键：能生成图，但不进 STATES / 词表。
+
+    运行时是否真的加载五键，由 GUI 侧
+    `test_five_overlay_keys_load_and_render_at_runtime` 单独钉。
+    """
     from expr_state import STATES
 
     d = _sku(tmp_path / "demo")
@@ -548,14 +552,16 @@ def test_protected_files_unchanged_since_baseline():
                  "desktop_pet/manifest.schema.json",
                  "desktop_pet/effect_table.json",
                  ".github/workflows/tests.yml"]
+    authorized = {"desktop_pet/manifest_io.py",
+                  "desktop_pet/manifest.schema.json"}   # v0.3 ① 显式授权
     try:
-        rev = subprocess.run(["git", "rev-parse", "--verify", "7531ff3"],
+        rev = subprocess.run(["git", "rev-parse", "--verify", "06008c9"],
                              cwd=ROOT, capture_output=True, text=True)
     except OSError:
         pytest.skip("git 不可用")
     if rev.returncode != 0:
-        pytest.skip("基线 commit 7531ff3 不在当前仓库")
-    diff = subprocess.run(["git", "diff", "--name-only", "7531ff3", "--",
+        pytest.skip("基线 commit 06008c9 不在当前仓库")
+    diff = subprocess.run(["git", "diff", "--name-only", "06008c9", "--",
                            *protected], cwd=ROOT, capture_output=True, text=True)
     assert diff.returncode == 0
-    assert diff.stdout.strip() == ""
+    assert set(diff.stdout.split()) <= authorized

@@ -233,6 +233,72 @@ def validate_manifest(data: dict) -> tuple[bool, str]:
                     lo, hi = SWAY_RANGES["bias"]
                     if not _is_num(w["bias"]) or not (lo <= float(w["bias"]) <= hi):
                         return False, f"items[{i}].{key}[{k}].bias 必须在 {lo}~{hi}"
+        if "annotation_draft" in it:
+            ok, msg = _validate_annotation_draft(
+                it["annotation_draft"], f"items[{i}].annotation_draft")
+            if not ok:
+                return False, msg
+        if "expr_frames" in it:
+            ok, msg = _validate_expr_frames(
+                it["expr_frames"], f"items[{i}].expr_frames")
+            if not ok:
+                return False, msg
+    return True, "ok"
+
+
+def _is_region(v) -> bool:
+    return (isinstance(v, dict)
+            and all(_is_num(v.get(k)) for k in ("cx", "cy", "rx", "ry"))
+            and all(0.0 <= float(v[k]) <= 1.0 for k in ("cx", "cy", "rx", "ry")))
+
+
+def _validate_annotation_draft(d, label: str) -> tuple[bool, str]:
+    """草案只校验形状；不判断真眼，不展开到 parts。"""
+    if not isinstance(d, dict):
+        return False, f"{label} 必须是对象"
+    if d.get("schema") != "ai-annotate/1":
+        return False, f"{label}.schema 必须是 ai-annotate/1"
+    for key in ("eyes", "hair"):
+        arr = d.get(key, [])
+        if not isinstance(arr, list):
+            return False, f"{label}.{key} 必须是数组"
+        for k, r in enumerate(arr):
+            if not _is_region(r):
+                return False, f"{label}.{key}[{k}] 必须是归一化区域"
+    mouth = d.get("mouth")
+    if mouth is not None and not _is_region(mouth):
+        return False, f"{label}.mouth 必须是归一化区域或 null"
+    sway = d.get("sway", {})
+    if not isinstance(sway, dict):
+        return False, f"{label}.sway 必须是对象"
+    for key, r in sway.items():
+        if key not in ("top", "bottom") or not _is_region(r):
+            return False, f"{label}.sway.{key} 必须是归一化区域"
+    warnings = d.get("warnings", [])
+    if not isinstance(warnings, list) or not all(
+            isinstance(x, str) for x in warnings):
+        return False, f"{label}.warnings 必须是字符串数组"
+    return True, "ok"
+
+
+def _validate_expr_frames(d, label: str) -> tuple[bool, str]:
+    """可选中间帧：每状态 1~8 帧，文件名锁死在 SKU 目录内。"""
+    if not isinstance(d, dict):
+        return False, f"{label} 必须是对象"
+    for state, frames in d.items():
+        if not isinstance(frames, list) or not (1 <= len(frames) <= 8):
+            return False, f"{label}.{state} 必须是 1~8 帧的数组"
+        for k, f in enumerate(frames):
+            if not isinstance(f, dict):
+                return False, f"{label}.{state}[{k}] 不是对象"
+            name = f.get("file")
+            if (not isinstance(name, str) or not name
+                    or "/" in name or "\\" in name or ".." in Path(name).parts):
+                return False, f"{label}.{state}[{k}].file 必须是 SKU 内文件名"
+            hold = f.get("hold_ms", 120)
+            if not isinstance(hold, int) or isinstance(hold, bool) \
+                    or not (16 <= hold <= 2000):
+                return False, f"{label}.{state}[{k}].hold_ms 必须在 16~2000"
     return True, "ok"
 
 

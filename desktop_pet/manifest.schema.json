@@ -16,6 +16,16 @@
     }
   },
   "$defs": {
+    "region": {
+      "type": "object",
+      "required": ["cx", "cy", "rx", "ry"],
+      "properties": {
+        "cx": {"type": "number", "minimum": 0, "maximum": 1},
+        "cy": {"type": "number", "minimum": 0, "maximum": 1},
+        "rx": {"type": "number", "minimum": 0, "maximum": 1},
+        "ry": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "part": {
       "type": "object",
       "required": ["id", "group", "channel"],
@@ -141,6 +151,42 @@
             "matting": {"type": "boolean"},
             "eye_level_source": {"enum": ["auto", "manual"]},
             "seed": {"type": "integer"}
+          }
+        },
+        "annotation_draft": {
+          "type": "object",
+          "description": "AI 标注草案：只读候选，确认前不展开到 parts",
+          "required": ["schema"],
+          "properties": {
+            "schema": {"const": "ai-annotate/1"},
+            "eyes": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+            "mouth": {"anyOf": [{"$ref": "#/$defs/region"}, {"type": "null"}]},
+            "hair": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+            "sway": {
+              "type": "object",
+              "properties": {
+                "top": {"$ref": "#/$defs/region"},
+                "bottom": {"$ref": "#/$defs/region"}
+              }
+            },
+            "warnings": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "expr_frames": {
+          "type": "object",
+          "description": "可选中间帧：状态名 → 帧列表；只做渲染层切索引",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "required": ["file"],
+              "properties": {
+                "file": {"type": "string"},
+                "hold_ms": {"type": "integer", "minimum": 16, "maximum": 2000}
+              }
+            }
           }
         }
       }

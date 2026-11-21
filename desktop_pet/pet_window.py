@@ -230,8 +230,10 @@ class PetWindow(QWidget):
         self._asr_worker = None
         # B-2：smile 走配置期独立覆盖层，不依赖 ExprBank 贴片
         self._smile = self._load_smile_overlay(item)
-        # AI 动作生成：joy / sleepy 也走独立覆盖层，状态名封闭在本文件白名单
+        # AI 动作生成：joy / sleepy / angry / sad / shy 也走独立覆盖层
         self._expr_overlays = self._load_expr_overlays(item)
+        # 整帧重绘的中间帧：只登记，首次取图时一次性烘焙显示帧
+        self._expr_frames = self._load_expr_frames(item)
         self.raw_blink = (self._blink_frames_from(self._render_rgba)
                           if (blink and asset.blink_on) else [])
         self.blink_enabled = blink and bool(self.raw_blink)
@@ -296,6 +298,9 @@ class PetWindow(QWidget):
             self.director = None
         self._expr_rgba: dict[str, np.ndarray] = {}
         self._expr_pixmaps: dict[str, QPixmap] = {}
+        self._expr_seq_rgba: dict[str, list[np.ndarray]] = {}
+        self._expr_seq_pixmaps: dict[str, list[QPixmap]] = {}
+        self._expr_seq_holds: dict[str, list[int]] = {}
 
         # 摆动幅度 / 整体漂移方向：右键菜单可调（幅度 0 = 静止），按窗口实例生效；
         # 多只共享同一 PetAsset 时也不会互相影响，且不写回素材 manifest；
@@ -375,6 +380,9 @@ class PetWindow(QWidget):
         self.base = to_pixmap(self._render_rgba, height)
         self._expr_rgba.clear()          # 显示尺寸变了，表情帧缓存作废
         self._expr_pixmaps.clear()
+        self._expr_seq_rgba.clear()
+        self._expr_seq_pixmaps.clear()
+        self._expr_seq_holds.clear()
         self._swing_cache = None         # 摆动帧按旧尺寸烘焙，一并作废
         self.blink_pixmaps = [to_pixmap(f, height) for f in self.raw_blink]
         # 头发飘动要按显示尺寸重采样 RGBA，位移场也按显示尺寸烘焙
@@ -694,6 +702,9 @@ class PetWindow(QWidget):
         self._overlay_hint = hint
         self._expr_rgba.clear()
         self._expr_pixmaps.clear()
+        self._expr_seq_rgba.clear()
+        self._expr_seq_pixmaps.clear()
+        self._expr_seq_holds.clear()
 
     def _expr_frame(self, state: str) -> tuple[np.ndarray, QPixmap]:
         """取该状态的显示尺寸帧；第一次用到才按显示高度重采样并缓存。
@@ -702,6 +713,8 @@ class PetWindow(QWidget):
         （与时间轴 frames[-1] 逐像素相同），不再走 ExprBank 的 blink 贴片。
         预览端（ui_app）仍是另一套，留到 T6 收。
         """
+        if state in self._expr_frames:
+            return self._expr_seq_frame(state)
         if state not in self._expr_pixmaps:
             # joy/sleepy/angry/sad/shy 不注册 STATES，只挂到已有状态上；
             # 有覆盖层时优先，否则回退原状态贴片。
@@ -991,7 +1004,7 @@ class PetWindow(QWidget):
         if not isinstance(slot, dict):
             return {}
         out: dict = {}
-        for state in ("joy", "sleepy"):
+        for state in ("joy", "sleepy", "angry", "sad", "shy"):
             entry = slot.get(state)
             name = entry.get("overlay") if isinstance(entry, dict) else None
             if not isinstance(name, str) or not name:
@@ -1001,6 +1014,65 @@ class PetWindow(QWidget):
             if ov is not None:
                 out[state] = ov
         return out
+
+    def _load_expr_frames(self, item: dict | None) -> dict:
+        """读 items[].expr_frames 的中间帧；只认文件名，越界 / 缺帧整状态跳过。"""
+        src = self.asset.source
+        if src is None:
+            return {}
+        item = self._resolve_item(item)
+        if not isinstance(item, dict):
+            return {}
+        slot = item.get("expr_frames")
+        if not isinstance(slot, dict):
+            return {}
+        out: dict = {}
+        for state, frames in slot.items():
+            if not isinstance(frames, list) or not frames:
+                continue
+            loaded = []
+            for f in frames[:8]:
+                name = f.get("file") if isinstance(f, dict) else None
+                if not isinstance(name, str) or not name:
+                    loaded = []
+                    break
+                ov = MouthOverlay.load(Path(src).parent, name,
+                                       self.asset.rgba.shape[:2])
+                if ov is None:
+                    loaded = []
+                    break
+                hold = f.get("hold_ms", 120)
+                if not isinstance(hold, int) or isinstance(hold, bool):
+                    hold = 120
+                loaded.append((ov, max(16, min(2000, hold))))
+            if loaded:
+                out[state] = loaded
+        return out
+
+    def _expr_seq_frame(self, state: str) -> tuple[np.ndarray, QPixmap]:
+        """按 hold_ms 在已烘焙的帧之间切索引；首次取图时一次性合成。"""
+        if state not in self._expr_seq_pixmaps:
+            rgba, pms, holds = [], [], []
+            for ov, hold in self._expr_frames[state]:
+                base = ov.apply(self._render_rgba)
+                f = resize_rgba(base, self.base.height())
+                rgba.append(f)
+                pms.append(to_pixmap(f, self.base.height()))
+                holds.append(hold)
+            self._expr_seq_rgba[state] = rgba
+            self._expr_seq_pixmaps[state] = pms
+            self._expr_seq_holds[state] = holds
+        rgba = self._expr_seq_rgba[state]
+        pms = self._expr_seq_pixmaps[state]
+        holds = self._expr_seq_holds[state]
+        total = sum(holds)
+        t = int(self.elapsed * 1000) % total
+        acc = 0
+        for i, h in enumerate(holds):
+            acc += h
+            if t < acc:
+                return rgba[i], pms[i]
+        return rgba[-1], pms[-1]
 
     def _load_motion_cfg(self) -> tuple[float, float | None]:
         """读当前 SKU 上次选的幅度倍数与漂移方向；旧扁平配置读时降级、不写回。
@@ -1974,7 +2046,7 @@ def main():
         threading.Thread(target=run_stdio,
                          args=(host, sys.stdin, proto_out),
                          daemon=True).start()
-        print("[mcp] stdio 服务已启动（默认只读 + propose；无 socket）",
+        print("[mcp] stdio 服务已启动（默认只读 + propose；无网络 socket）",
               file=sys.stderr)
     sys.exit(app.exec())
 
