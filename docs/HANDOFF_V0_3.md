@@ -1,6 +1,7 @@
 # HANDOFF v0.3：Ⅳ 档边界与授权清单
 
-> 本文件最初是 R1 边界文档；R2 已授权并落地，实施结果见 §10。
+> 本文件最初是 R1 边界文档；R2 已授权并落地，实施结果见 §10；
+> R3 工程增强与 v0.3 未接线补完见 §11（v0.3.1）。
 > 基线：R1 结案 `f4bf417`（v0.2.2 之后的文档批）。
 > ① 授权改动 `manifest_io.py` / `manifest.schema.json`，已同 commit 重订哈希；
 > 其余保护项自 `f4bf417` 零 diff；`expr_state.py` 哈希 `c14c92c…` 不变。
@@ -507,3 +508,25 @@ tag：v0.3（annotated），v0.1~v0.2.2 不动
   重订哈希；其余保护项自 `f4bf417` 零 diff。
 - ⑤ / ⑥ 默认关，零新 Python 依赖；干净 venv 五包可收集全部新节点。
 - ⑦ 未动 `expr_state.py` / `anim.py`，`c14c92c…` 不变。
+
+## 11. R3（v0.3.1）工程增强与接线状态
+
+基线 `991853b`（M1 自动前移）。本批只做工程增强与 v0.3 未接线补完，
+不改 Ⅳ 档边界、不新增状态、不动保护 7 项。
+
+| 项 | 已实现 | 已接线 | 未接线 / 默认 |
+|---|---|---|---|
+| 多模型路由 | `model_router.py`：`routing.enabled` + 三任务映射，空值回退旧链路 | `chat_provider.stream_chat(task=...)` 按路由取 profile / model | 视觉 / 推理任务尚无独立调用入口；`routing.enabled` 默认关 |
+| 失败重试 | `chat_contract.retry_attempts()`：`chat.retry` 默认 0，上限 2 次 | `chat_worker` 单次路径按次数重试；已吐字不再重试 | 无 UI 开关；默认零重试 |
+| token / 费用 | `usage_meter.py`：只按类别估算，不存正文 | worker `_deliver()` 在 `chat.usage_log=true` 时写 stderr | 无界面费用面板；默认不打印 |
+| 系统钥匙串 | `secrets_store.py`：环境变量 > 可选 keyring > 0600 文件 | `chat_provider` 统一走 `resolve_key()` | 无 UI 配置；`chat.keyring` 默认关 |
+| ① 保存按钮 | 只读报告弹窗新增「保存草案到 manifest」 | 人工确认 → `annotation_draft.save_draft()` → `commit_changes()` | 不展开 parts、不自动判真眼 |
+| ③ 默认链路 | `agent_core.loop_config()`：`agent.enabled` 且 `max_steps>1` 才开 | `chat_worker` 走 `run_loop`；失败静默回 idle | 默认关；`chat.enabled=false` 仍零网络 |
+| ⑤ UI 调用方 | `cloud_office.http_poster()`：只投 https、只发三类字段 | 右键「发送办公事件…」→ `cloud_ready` 四项 → `send_event` | 默认关；未就绪只提示、零网络 |
+
+- 三段 commit：feat（实现）/ test（`test_v031_*`）/ docs（本文件与
+  CHANGELOG / README / HANDOFF_V0_2）。
+- 保护 7 项自 `991853b` 零 diff；`manifest_io.py` / schema 的 v0.3 新哈希
+  不再重订。
+- 零新 Python 依赖；`keyring` 是可选运行时导入，干净 venv 五包不装它。
+- 对外措辞：`fake provider 端到端（不连真实 API / 权重）`，不写「假端到端」。

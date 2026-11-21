@@ -2,6 +2,35 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## v0.3.1（R3 工程增强 + 未接线补完）
+
+### 行为变更
+
+- 多模型路由：新增 `model_router.py`，按 `routing.tasks.<chat|vision|reasoning>`
+  选 profile / model；默认关，空值回退顶层 provider / `chat.model`，
+  不内置模型 ID、host。
+- 失败重试：`chat.retry` 默认 0（只跑一次），上限 2 次；已吐字不再重试，
+  保持「不重复气泡」口径；超时仍由 provider 的 `timeout` 硬停。
+- token / 费用：新增 `usage_meter.py`，只按类别打
+  `in≈N tok / out≈M tok`；`chat.usage_log` 默认关，不记正文 / URL /
+  key / 原图名。
+- 系统钥匙串：新增 `secrets_store.py`，环境变量优先；`chat.keyring`
+  默认关，`chat.key_file` 可选且 POSIX 下必须是 0600，否则拒绝读取。
+- ① 标注报告弹窗新增「保存草案到 manifest」按钮：只写
+  `annotation_draft`，人工确认后仍走 `commit_changes()`。
+- ③ `agent.enabled=true` 且 `max_steps>1` 时，对话走
+  `agent_core.run_loop`；默认关，失败仍静默回 idle；不翻案
+  `chat.enabled=false` 的零网络默认。
+- ⑤ 右键新增「发送办公事件…」：先过 `cloud_ready` 四项；未就绪只提示、
+  零网络；就绪后由 `http_poster()` 直投 https，只发
+  kind / text / emotion，不执行办公动作、不回传确认。
+
+### 保护与依赖
+
+- 零新 Python 依赖；`keyring` 只是可选运行时导入，不进 CI 五包。
+- 保护 7 项自 `991853b` 零 diff；本批未再动 manifest 两项哈希。
+- 干净 venv 五包可收集全部新增节点；GUI 文件仍只 skip 1 个模块。
+
 ## v0.3（Ⅳ 档授权实现）
 
 ### 基线校准

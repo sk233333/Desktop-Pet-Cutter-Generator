@@ -285,6 +285,17 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 3. 把 `chat.enabled` 改为 `true`，重启桌宠。
 
 - 模型 ID 与地址不写死；换模型只改配置，不改代码。
+- 多模型路由（v0.3.1，默认关）：`routing.enabled=true` 后按
+  `routing.tasks.chat / vision / reasoning` 选 profile / model；空值回退
+  顶层 `provider` / `chat.model`。
+- 失败重试默认关：`chat.retry=0` 只跑一次；可设 1~2，已吐字后不再重试，
+  避免气泡重复。
+- token / 费用默认不显示：`chat.usage_log=true` 时只在 stderr 打
+  `chat in≈N tok out≈M tok` 类别行，不含正文 / URL / key / 原图名。
+- 系统钥匙串可选：环境变量优先；`chat.keyring=true` 才尝试可选 keyring，
+  `chat.key_file` 指定的文件在 POSIX 下必须是 0600。
+- 云办公默认关：右键「发送办公事件…」先检查 `cloud.enabled` / `consent` /
+  https `base_url` / `key_env` 四项，未就绪只提示、不联网。
 - 词表在窗口启动时从 `expr_state.STATES` + `ActionBridge.registry` +
   逐 SKU `effects.enabled` 反推一次，**不含 `blink`**；`smile` 已接线并进词表；
   改配置需重启生效。
@@ -295,7 +306,8 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
 - 独立 Agent：`agent.json` 的 `agent.enabled=true` 且
   `profiles.<name>.surface=agent_stdio` 时，对话改走子进程 JSONL；
   输出仍是 `text / emotion / action / mood_hint / remember`，
-  由 `arbiter.request("interaction", ...)` 统一消费。
+  由 `arbiter.request("interaction", ...)` 统一消费。`max_steps>1` 时
+  走 `agent_core.run_loop`（v0.3.1，默认关，失败回 idle）。
 - `mood_hint` 只从封闭覆盖层键（joy / sleepy / angry / sad / shy）里选，
   有对应素材时优先取图，不新增状态名。
 - 无 key / 断网 / 429 / 超时 / 乱码 → 静默回 idle，不弹错误气泡。
@@ -326,6 +338,7 @@ python3 desktop_pet/pet_window.py --sku bgy --stem bgy_001_white --mcp-stdio
 
 Ⅳ 档（v0.3）的边界与实施状态见 `docs/HANDOFF_V0_3.md`：
 ①~⑥ 已按授权落地，默认关 / 只回候选；⑦ 授权已用、判定不新增状态。
+R3 工程增强与未接线补完见同一文件 §11（v0.3.1）。
 对外不要写成「AI 可自由生成新状态名」。
 
 ### 跑起来（桌宠）

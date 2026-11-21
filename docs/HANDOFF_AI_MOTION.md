@@ -172,17 +172,21 @@ JSON 对象；勾选项为空；覆盖层渲染为空（缺眼睛标注）；写
    草案不自动写 STATES；面积前二疑似挂件靠人挡，不自动判真眼。
 3. **更多表情 / 整帧重绘**：`angry/sad/shy` 已作为封闭覆盖层键落地
    （`angry→surprise`、`sad→half`、`shy→smile`）；新增状态名仍是 B-2 同款
-   （动状态表 → 单独边界文档 + 显式授权）。整帧重绘 / 中间帧未做，
+   （动状态表 → 单独边界文档 + 显式授权）。整帧重绘 / 中间帧已落地
+   （`frame_redraw.py`，v0.3 ②，首次烘焙、tick 只切索引），
    别和 PachiPakuGen / Anime2.5DRig 混。
 4. **切割质量增强**：只读质检已落地（`cut_quality.py`：白边 / 阴影 /
    软边 / 覆盖率 / 毛刺）；自动重切保留「结果可否决」，打分不自动覆盖
    人工选择。
 5. **对话与语音**：memory + Agent 已接线（`memory_store.py` /
    `agent_bridge.py`）；TTS 默认关、ASR 只有函数；新依赖仍单独一轮、
-   不进 CI 五包。
+   不进 CI 五包。v0.3.1 起 `agent.enabled=true` 且 `max_steps>1` 时，
+   `chat_worker` 走 `agent_core.run_loop`（默认关，失败回 idle）。
 6. **工程增强**：多模型路由沿用 `key_env` 占位、零具体模型 ID；流式 / 重试
    默认关且「已吐字不再重试」；token/费用只打类别不打 URL/key；系统钥匙串
-   可选，0600 文件 + 环境变量优先先保持。
+   可选，0600 文件 + 环境变量优先先保持。以上四项已在 v0.3.1 落地
+   （`model_router.py` / `usage_meter.py` / `secrets_store.py`），
+   默认全关、零新依赖。
 
 ### 8.6 已否决 7 项（不得从未来建议里捡回）
 
