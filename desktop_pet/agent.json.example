@@ -32,7 +32,24 @@
   "agent": {
     "enabled": false,
     "command": "",
+    "timeout_ms": 8000,
+    "max_steps": 4
+  },
+  "multi_agent": {
+    "enabled": false,
+    "max_agents": 3,
+    "max_rounds": 2,
     "timeout_ms": 8000
+  },
+  "cloud": {
+    "enabled": false,
+    "consent": false,
+    "base_url": "",
+    "key_env": ""
+  },
+  "weights": {
+    "sam2": "",
+    "grounding_dino": ""
   },
   "voice": {
     "enabled": false,

@@ -83,6 +83,11 @@ CLI_FLAGS = {
 }
 CKPT = (Path(__file__).resolve().parent.parent
         / "Punctuation_selection_of_images" / "sam2.1_hiera_small.pt")
+try:  # 用户自备权重路径优先；缺失时回退旧默认路径
+    from .weights import resolve_weight as _resolve_weight
+except ImportError:  # 直接以脚本方式运行
+    from weights import resolve_weight as _resolve_weight
+CKPT = _resolve_weight({}, "sam2") or CKPT
 
 
 # ------------------------------------------------------------------
