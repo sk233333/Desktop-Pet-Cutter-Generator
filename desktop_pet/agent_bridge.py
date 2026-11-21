@@ -72,7 +72,14 @@ def _parse_reply(raw: str) -> dict:
     remember = obj.get("remember")
     if isinstance(remember, str) and remember.strip():
         out["remember"] = remember.strip()[:200]
-    if not out.get("text"):
+    # L2 循环的中间步可能只回候选 / 报告；仍是候选源，不直接写盘。
+    report = obj.get("report")
+    if isinstance(report, (dict, list)):
+        out["report"] = report
+    change_set = obj.get("change_set")
+    if isinstance(change_set, dict):
+        out["change_set"] = change_set
+    if not out.get("text") and not out.get("report") and not out.get("change_set"):
         raise AgentError("Agent 输出没有可用字段")
     return out
 

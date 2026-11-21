@@ -10,8 +10,14 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.request
+
+try:  # 包内 / 脚本两种导入方式
+    from .model_router import resolve_route
+    from .secrets_store import resolve_key
+except ImportError:  # pragma: no cover - 直接以脚本方式运行
+    from model_router import resolve_route
+    from secrets_store import resolve_key
 
 
 def _endpoint(base_url: str) -> str:
@@ -59,12 +65,13 @@ def _iter_sse(resp):
 
 
 def stream_chat(cfg: dict, sys_msg: str, messages: list[dict], *,
-                sku: str = ""):
+                sku: str = "", task: str = "chat"):
     """yield 增量文本 token；异常向上抛给 worker 统一降级。
 
     - `chat.enabled != true` 时直接抛错，保证关闭状态零网络；
+    - `routing.enabled=true` 时按 `task` 选 profile / model，空值回退旧链路；
     - `json_mode == "object"`：同时给 `response_format` 与 prompt 里的 json 字样；
-    - 超时取 `chat.timeout_ms`；不重试。
+    - 超时取 `chat.timeout_ms`；不重试（重试在 chat_worker，默认关）。
     - profile.surface == "agent_stdio" 时不走 HTTP，交给独立 Agent 子进程；
       Agent 输出仍是一行 JSON，worker 照常 parse / clamp。
     """
@@ -73,12 +80,14 @@ def stream_chat(cfg: dict, sys_msg: str, messages: list[dict], *,
     if not chat.get("enabled"):
         raise RuntimeError("chat.enabled=false，不发起网络请求")
     base_url = str(chat.get("base_url") or "").strip()
-    model = str(chat.get("model") or "").strip()
+    route = resolve_route(cfg, task)
+    model = str(route.get("model") or "").strip()
     if not base_url or not model:
         raise RuntimeError("agent.json 缺少 base_url 或 model")
 
     profiles = cfg.get("profiles") if isinstance(cfg.get("profiles"), dict) else {}
-    profile = profiles.get(cfg.get("provider") or "") or {}
+    provider_name = str(route.get("provider") or cfg.get("provider") or "")
+    profile = profiles.get(provider_name) or {}
     profile = profile if isinstance(profile, dict) else {}
     surface = str(profile.get("surface") or "openai_chat")
     if surface == "agent_stdio":
@@ -95,7 +104,7 @@ def stream_chat(cfg: dict, sys_msg: str, messages: list[dict], *,
         raise ValueError(f"暂不支持的 provider surface：{surface}")
 
     key_env = str(chat.get("key_env") or "DESKTOP_PET_API_KEY")
-    key = os.environ.get(key_env, "")
+    key = resolve_key(cfg)
     auth = str(profile.get("auth") or "bearer")
     if auth == "bearer" and not key:
         raise RuntimeError(f"环境变量 {key_env} 未设置")

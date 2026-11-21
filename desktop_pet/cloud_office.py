@@ -10,11 +10,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import urllib.request
 from dataclasses import dataclass
 
 DEFAULT_MAX_TEXT = 400
+DEFAULT_TIMEOUT_MS = 8000
 
 _URL_RE = re.compile(r"https?://[^\s]+")
 _PATH_RE = re.compile(r"(?:~|/home)/[^\s]*")
@@ -28,6 +31,7 @@ class CloudConfig:
     base_url: str = ""
     key_env: str = ""
     max_text: int = DEFAULT_MAX_TEXT
+    timeout_ms: int = DEFAULT_TIMEOUT_MS
 
     @classmethod
     def from_dict(cls, raw) -> "CloudConfig":
@@ -46,9 +50,13 @@ class CloudConfig:
         if not isinstance(max_text, int) or isinstance(max_text, bool) \
                 or max_text <= 0:
             max_text = DEFAULT_MAX_TEXT
+        timeout_ms = data.get("timeout_ms")
+        if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) \
+                or timeout_ms <= 0:
+            timeout_ms = DEFAULT_TIMEOUT_MS
         return cls(enabled=_flag("enabled"), consent=_flag("consent"),
                    base_url=_text("base_url"), key_env=_text("key_env"),
-                   max_text=max_text)
+                   max_text=max_text, timeout_ms=timeout_ms)
 
 
 def _as_config(cfg) -> CloudConfig:
@@ -122,3 +130,27 @@ def send_event(cfg, event, *, poster=None, logger=None) -> dict:
         return {"delivered": False, "reason": "post_failed"}
     _log(logger, "cloud_event ok")
     return {"delivered": True, "reason": "ok"}
+
+
+def http_poster(cfg, *, opener=None):
+    """返回一个「被调用时才发请求」的 poster；默认关时由 send_event 挡住。
+
+    只在 ``cloud_ready`` 为真且调用方主动调用时才会走到网络；key 取自
+    ``key_env`` 指向的环境变量，不写日志、不回传响应正文。
+    """
+    conf = _as_config(cfg)
+    url = conf.base_url
+    key = _env_key(conf)
+    timeout = max(0.1, float(conf.timeout_ms or DEFAULT_TIMEOUT_MS) / 1000.0)
+    open_url = opener or urllib.request.urlopen
+
+    def post(payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {key}"})
+        with open_url(req, timeout=timeout) as resp:
+            resp.read()
+
+    return post

@@ -5450,10 +5450,57 @@ class LaunchUI(QWidget):
         te = QPlainTextEdit(format_report(report, width, height))
         te.setReadOnly(True)
         v.addWidget(te)
+        row = QHBoxLayout()
+        save = QPushButton("保存草案到 manifest")
+        save.setEnabled(self._ai_motion_target() is not None)
+        save.setToolTip("只写 annotation_draft；不展开 parts、不自动判真眼")
+        save.clicked.connect(lambda: self._save_annotate_draft(report, dlg))
+        row.addWidget(save)
+        row.addStretch(1)
         btn = QPushButton("关闭")
         btn.clicked.connect(dlg.accept)
-        v.addWidget(btn, 0, Qt.AlignmentFlag.AlignRight)
+        row.addWidget(btn)
+        v.addLayout(row)
         dlg.exec()
+
+    def _save_annotate_draft(self, report, dlg):
+        """① 界面保存按钮：人工确认后只写可选草案字段。"""
+        target = self._ai_motion_target()
+        if target is None:
+            QMessageBox.information(
+                self, "保存草案",
+                "先在桌宠空间点「修改」载入一只已生成的桌宠，再保存草案。")
+            return
+        sku, stem, out_dir, idx, item = target
+        ans = QMessageBox.question(
+            self, "保存草案",
+            f"把只读报告写进 {sku} / {stem} 的 annotation_draft？\n"
+            "只写草案字段，不改 parts / hair / cloth / sway，也不会自动判真眼。")
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+
+        from annotation_draft import save_draft
+        import upgrade_core
+        info = next((s for s in upgrade_core.scan_skus(out_dir.parent)
+                     if s.name == out_dir.name), None)
+        if info is None:
+            info = upgrade_core.SkuInfo(
+                name=out_dir.name, dir=out_dir,
+                manifest_path=out_dir / upgrade_core.MANIFEST_NAME,
+                manifest={}, schema_version=2, sku_field=out_dir.name)
+        try:
+            result = save_draft(info, idx, report)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "保存草案", f"写入失败：{exc}")
+            return
+        if not result.report.ok:
+            QMessageBox.warning(
+                self, "保存草案",
+                "写入失败（已回滚）：\n" + result.report.text)
+            return
+        QMessageBox.information(
+            self, "保存草案", "已写入：\n" + "\n".join(result.report.lines))
+        dlg.accept()
 
     def _open_ai_motion(self):
         """动作参数页入口：调 ai_motion.json → 逐项勾选 → 同一 commit_changes 落盘。"""

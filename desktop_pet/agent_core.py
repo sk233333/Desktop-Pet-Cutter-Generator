@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -44,6 +45,32 @@ class LoopResult:
     stopped_reason: str = ""
 
 
+def parse_step_reply(raw) -> dict:
+    """解析 L2 单步回复：允许只有 ``report`` / ``change_set``。
+
+    单次对话仍走 ``chat_contract.safe_parse`` 的严格三字段；循环步是候选源，
+    中间步没有 text 时不应直接判失败。非法输入返回 ``{}``。
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        obj = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    out: dict = {}
+    for key in ("text", "emotion", "action", "mood_hint", "remember"):
+        val = obj.get(key)
+        if isinstance(val, str) and val:
+            out[key] = val
+    for key in ("change_set", "report"):
+        val = obj.get(key)
+        if isinstance(val, (dict, list)):
+            out[key] = val
+    return out
+
+
 def normalize_result(raw: dict) -> dict:
     """只保留允许字段；text / remember 为字符串并截到 400 字符。"""
     if not isinstance(raw, dict):
@@ -72,6 +99,31 @@ def _timeout_seconds(timeout_ms) -> float:
     except (TypeError, ValueError):
         ms = 8000.0
     return max(0.0, ms) / 1000.0
+
+
+def loop_config(cfg) -> dict:
+    """从 ``agent.json`` 的 ``agent`` 段解析循环开关。
+
+    默认关：``agent.enabled`` 必须是布尔 ``True`` 且 ``max_steps > 1``；
+    否则调用侧继续走单次对话，行为与旧版一致。
+    """
+    raw = cfg.get("agent") if isinstance(cfg, dict) else None
+    agent = raw if isinstance(raw, dict) else {}
+    enabled = agent.get("enabled") is True
+    try:
+        steps = int(agent.get("max_steps") or 4)
+    except (TypeError, ValueError):
+        steps = 4
+    steps = max(1, min(steps, MAX_STEPS))
+    try:
+        timeout_ms = float(agent.get("timeout_ms") or 8000)
+    except (TypeError, ValueError):
+        timeout_ms = 8000.0
+    return {
+        "enabled": bool(enabled and steps > 1),
+        "max_steps": steps,
+        "timeout_ms": max(0.0, timeout_ms),
+    }
 
 
 def run_loop(step_fn, *, max_steps=4, timeout_ms=8000,

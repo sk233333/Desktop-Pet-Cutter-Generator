@@ -41,6 +41,10 @@ _DEFAULT_CHAT = {
     "max_tokens": 120,
     "history": 10,
     "json_mode": "object",
+    "retry": 0,           # 失败重试次数（默认关）；已吐字不再重试
+    "usage_log": False,   # token / 费用估算只打类别，默认关
+    "keyring": False,     # 可选系统钥匙串，默认关
+    "key_file": "",       # 可选 0600 key 文件，环境变量优先
 }
 
 
@@ -231,11 +235,31 @@ def chat_enabled(cfg: dict) -> bool:
     return chat.get("enabled") is True if isinstance(chat, dict) else False
 
 
+def retry_attempts(cfg: dict, limit: int = 2) -> int:
+    """``chat.retry`` → 总尝试次数；默认 0 = 只跑一次。
+
+    上限默认 2 次重试（共 3 次尝试）。「已吐字是否重试」由调用侧判断，
+    这里只给次数，不改变流式语义。
+    """
+    chat = cfg.get("chat") if isinstance(cfg, dict) else None
+    chat = chat if isinstance(chat, dict) else {}
+    try:
+        retry = int(chat.get("retry") or 0)
+    except (TypeError, ValueError):
+        retry = 0
+    try:
+        cap = max(0, int(limit))
+    except (TypeError, ValueError):
+        cap = 2
+    return 1 + max(0, min(retry, cap))
+
+
 def load_agent_config(path=None) -> dict:
     """读 `desktop_pet/agent.json`；缺失或损坏时返回「关闭」配置，不抛异常。"""
     p = Path(path) if path else Path(__file__).with_name("agent.json")
     cfg = {"chat": dict(_DEFAULT_CHAT), "provider": "", "profiles": {},
-           "skus": {}, "agent": {}, "voice": {}}
+           "skus": {}, "agent": {}, "voice": {}, "cloud": {},
+           "multi_agent": {}, "weights": {}, "routing": {}}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -252,7 +276,8 @@ def load_agent_config(path=None) -> dict:
     for key in ("provider",):
         if isinstance(data.get(key), str):
             cfg[key] = data[key]
-    for key in ("profiles", "skus", "agent", "voice"):
+    for key in ("profiles", "skus", "agent", "voice", "cloud",
+                "multi_agent", "weights", "routing"):
         if isinstance(data.get(key), dict):
             cfg[key] = data[key]
     return cfg

@@ -50,7 +50,8 @@ from PyQt6.QtCore import (QPoint, QPointF, QRect, Qt, QTimer,
 from PyQt6.QtGui import (QCursor, QFont, QGuiApplication, QImage, QPainter,
                          QPixmap, QTransform)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QGridLayout,
-                             QInputDialog, QLabel, QMenu, QPushButton, QWidget)
+                             QInputDialog, QLabel, QMenu, QMessageBox,
+                             QPushButton, QWidget)
 
 try:
     from .anim import (HairField, PetAsset, blink_group_counts, blink_phases,
@@ -1431,6 +1432,40 @@ class PetWindow(QWidget):
         item["box"]["ok"] = bool(text) and bool(expr_ok or bubble_ok)
         item["done"].set()
 
+    def _open_cloud_event(self):
+        """⑤ UI 调用方：默认关；未就绪只提示，不发起网络。"""
+        try:
+            from .cloud_office import cloud_ready, http_poster, send_event
+        except ImportError:
+            from cloud_office import cloud_ready, http_poster, send_event
+        cfg = self._chat_cfg.get("cloud") if isinstance(self._chat_cfg, dict) else None
+        if not cloud_ready(cfg):
+            QMessageBox.information(
+                self, "办公事件",
+                "云办公默认关闭。\n需要 agent.json 的 cloud.enabled=true、"
+                "consent=true、https 开头的 base_url，且 key_env 指向的"
+                "环境变量非空。")
+            return
+        text, ok = QInputDialog.getText(self, "办公事件", "要播报的文本：")
+        if not ok or not text.strip():
+            return
+        ans = QMessageBox.question(
+            self, "办公事件",
+            "将把这段文本发送到已配置的 https 服务。\n"
+            "只发 kind / text / emotion，不执行办公动作，也不回传确认。继续？")
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        result = send_event(
+            cfg, {"kind": "manual", "text": text.strip()},
+            poster=http_poster(cfg),
+            logger=lambda line: print(f"[cloud] {line}", file=sys.stderr))
+        if result.get("delivered"):
+            QMessageBox.information(self, "办公事件", "已投递。")
+        else:
+            QMessageBox.warning(
+                self, "办公事件",
+                f"未投递：{result.get('reason') or 'unknown'}")
+
     def _open_action_settings(self):
         """图形化配置动作：选程序、勾双击、保存后立即生效（不用重启）。"""
         from action_dialog import ActionDialog
@@ -1629,6 +1664,8 @@ class PetWindow(QWidget):
         else:
             act_chat = menu.addAction("说句话…（未启用）")
             act_chat.setEnabled(False)
+        act_cloud = menu.addAction("发送办公事件…")
+        act_cloud.setToolTip("云办公默认关；四项就绪才投递，只发类别与文本")
         menu.addSeparator()
         act_pause = menu.addAction("继续动画" if self.paused else "暂停动画")
 
@@ -1692,6 +1729,8 @@ class PetWindow(QWidget):
             self._chat_prompt()
         elif act is not None and act == act_asr:
             self._asr_prompt()
+        elif act is not None and act == act_cloud:
+            self._open_cloud_event()
         elif act == act_pause:
             self.paused = not self.paused
             self.update()
