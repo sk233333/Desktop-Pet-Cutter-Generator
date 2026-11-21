@@ -2,12 +2,42 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
-## v0.3 边界（仅文档，未授权实现）
+## v0.3（Ⅳ 档授权实现）
 
-- 新增 `docs/HANDOFF_V0_3.md`：Ⅳ 档七项边界一次摊完（W3 选 1、整帧重绘 +
-  中间帧、L2 自主循环、多 Agent、公网/云 API、真实权重、新增状态名）。
-- 七项全部未授权；每项写明结论落层、允许动的文件、断言清单、三档状态与停线。
-- 无代码、无行为变更；保护 7 项自 `06008c9` 零 diff。
+### 基线校准
+
+- W4 五键（joy / sleepy / angry / sad / shy）运行时全部加载；此前
+  `_load_expr_overlays()` 只循环 joy / sleepy，生成得出、运行时看不见。
+- MCP 启动日志「无 socket」改为「无网络 socket」。
+- 旧节点 `test_new_overlay_keys_render_without_new_states` 更名为
+  `test_new_overlay_keys_generate_without_new_states`，渲染另由 GUI 节点验证。
+
+### 行为变更
+
+- ① 标注草案：新增可选 `annotation_draft` 字段与写入口，只写草案、
+  不展开到 parts；人工确认后仍走 `commit_changes()`。
+- ② 中间帧：新增 `frame_redraw.py` 与可选 `expr_frames`；运行时首次取图
+  烘焙、之后只切索引，`_pick_frame()` 内不重新合成。
+- ③ L2 循环：新增 `agent_core.py`，工具白名单 + max_steps + timeout 硬停，
+  只回候选 / 报告，不 commit、不写 manifest。
+- ④ 多 Agent：新增 `multi_agent.py`，配置期串行 fan-out 与冲突标记；
+  不启动线程 / 进程，不自动裁决。
+- ⑤ 云办公：新增 `cloud_office.py`，默认关、四项就绪才投递，
+  只回候选 / notify，不自动执行、不回传确认。
+- ⑥ 权重：新增 `weights.py`，只解析用户自备路径，不下载、不进仓。
+- ⑦ 授权已用：核完 STATES / 图集 / 词表 / 取帧 / 存盘六处后判定本次
+  不新增状态；`expr_state.py` / `anim.py` 零改动，哈希不变。
+
+### 保护与依赖
+
+- `manifest_io.py` / `manifest.schema.json` 因 ① 授权改动，同一 commit
+  重订哈希；其余保护项自 `06008c9` 零 diff。
+- 零新 Python 依赖；⑤/⑥ 默认关、不进 CI 五包；干净 venv 仍可收集全部新节点。
+
+## v0.3 边界（R1，仅文档）
+
+- 新增 `docs/HANDOFF_V0_3.md`：Ⅳ 档七项边界一次摊完。
+- 每项写明结论落层、允许动的文件、断言清单、三档状态与停线。
 
 ## v0.2.2（本地 MCP 收窄版）
 

@@ -324,8 +324,9 @@ python3 desktop_pet/pet_window.py --sku bgy --stem bgy_001_white --mcp-stdio
   畸形 JSON 各回一条错误，不崩、不落盘。
 - 协议层零新依赖，干净 venv 五包可直接跑 `test_mcp_*`。
 
-Ⅳ 档（v0.3 候选）的边界与授权范围见 `docs/HANDOFF_V0_3.md`；
-七项均未授权、未实现，不要按「已交付」对外表述。
+Ⅳ 档（v0.3）的边界与实施状态见 `docs/HANDOFF_V0_3.md`：
+①~⑥ 已按授权落地，默认关 / 只回候选；⑦ 授权已用、判定不新增状态。
+对外不要写成「AI 可自由生成新状态名」。
 
 ### 跑起来（桌宠）
 

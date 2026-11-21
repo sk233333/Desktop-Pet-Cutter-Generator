@@ -1,9 +1,9 @@
 # HANDOFF v0.3：Ⅳ 档边界与授权清单
 
-> 本文件是 R1 的唯一产物：**只文档、零代码、零行为变更**。
-> 七项都**未授权**；R2 需要逐项或整批显式授权后才允许动代码。
-> 基线：`06008c9`（v0.2.2 之后的并批推结案点）。
-> 保护 7 项自 `06008c9` 零 diff；`expr_state.py` 哈希 `c14c92c…` 不变。
+> 本文件最初是 R1 边界文档；R2 已授权并落地，实施结果见 §10。
+> 基线：R1 结案 `f4bf417`（v0.2.2 之后的文档批）。
+> ① 授权改动 `manifest_io.py` / `manifest.schema.json`，已同 commit 重订哈希；
+> 其余保护项自 `f4bf417` 零 diff；`expr_state.py` 哈希 `c14c92c…` 不变。
 > 测试数 / hash 以 `pytest -q` / `git log` 当前结果为准，本文不写死。
 
 ## 0. 读法
@@ -481,11 +481,29 @@ tag：v0.3（annotated），v0.1~v0.2.2 不动
 
 ## 9. 当前事实与差异登记
 
-1. **W4 运行时缺口**：五键生成 / 写 manifest 已通，运行时只加载
-   joy / sleepy（`pet_window.py:994`）；angry / sad / shy 需一行 feat 修复，
-   归 R3，不混进 R1。
+1. **W4 运行时缺口（已修）**：R1 时 `_load_expr_overlays()` 只加载
+   joy / sleepy；R2 基线校准已扩到五键，GUI 侧有
+   `test_five_overlay_keys_load_and_render_at_runtime`。
 2. **W2 文本引导切割**：当前仓库已删除 `ai_cut_box.py`，主界面无文本入口
    （`HANDOFF_V0_2.md` §8 同口径）；对外不要再写「文本引导切割已交付」。
-3. **CHANGELOG 旧表述**：v0.2.2 段「没有 socket」在本批 docs 订正为
+3. **CHANGELOG 旧表述**：v0.2.2 段「没有 socket」已订正为
    「没有网络 socket、不监听端口」；Qt 内部未命名 Unix socketpair 不计。
-4. **本文件不授权任何实现**：七项全部未接线；R2 需显式授权。
+4. **R2 授权已用**：①~⑥ 已落地；⑦ 核完六处后判定本次不新增状态。
+
+## 10. R2 实施状态
+
+| 项 | 落地 | 关键文件 / 节点 |
+|---|---|---|
+| 基线校准 | 五键运行时加载 + 日志改「无网络 socket」 | `pet_window.py`；`test_five_overlay_keys_load_and_render_at_runtime` |
+| ① 草案 | 可选 `annotation_draft` + 写入口 | `manifest_io.py`、`annotation_draft.py`；`test_v03_*` 8 条 |
+| ② 中间帧 | 纯函数 + `expr_frames` + 运行时切索引 | `frame_redraw.py`、`pet_window.py`；`test_v03_expr_frames_*` |
+| ③ L2 | 白名单 + max_steps + timeout 纯逻辑 | `agent_core.py`；`test_v03_loop_*` |
+| ④ 多 Agent | 配置期 fan-out + 冲突标记 | `multi_agent.py`；`test_v03_fan_out_*` |
+| ⑤ 云办公 | 默认关 + 四项就绪 + 脱敏 | `cloud_office.py`；`test_v03_cloud_*` |
+| ⑥ 权重 | 用户路径解析 + 不下载 | `weights.py`、`launch.py`；`test_v03_weight_*` |
+| ⑦ 新状态 | 授权已用，判定不新增；STATES 七态不变 | `test_state_extension_guard.py` |
+
+- ① 的 `manifest_io.py` / `manifest.schema.json` 在同一次 feat commit 内
+  重订哈希；其余保护项自 `f4bf417` 零 diff。
+- ⑤ / ⑥ 默认关，零新 Python 依赖；干净 venv 五包可收集全部新节点。
+- ⑦ 未动 `expr_state.py` / `anim.py`，`c14c92c…` 不变。
