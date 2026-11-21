@@ -1,7 +1,8 @@
 # HANDOFF v0.3：Ⅳ 档边界与授权清单
 
 > 本文件最初是 R1 边界文档；R2 已授权并落地，实施结果见 §10；
-> R3 工程增强与 v0.3 未接线补完见 §11（v0.3.1）。
+> R3 工程增强与 v0.3 未接线补完见 §11（v0.3.1）；
+> 开会功能的边界与实现见 §12（v0.3.2，默认关）。
 > 基线：R1 结案 `f4bf417`（v0.2.2 之后的文档批）。
 > ① 授权改动 `manifest_io.py` / `manifest.schema.json`，已同 commit 重订哈希；
 > 其余保护项自 `f4bf417` 零 diff；`expr_state.py` 哈希 `c14c92c…` 不变。
@@ -530,3 +531,43 @@ tag：v0.3（annotated），v0.1~v0.2.2 不动
   不再重订。
 - 零新 Python 依赖；`keyring` 是可选运行时导入，干净 venv 五包不装它。
 - 对外措辞：`fake provider 端到端（不连真实 API / 权重）`，不写「假端到端」。
+
+## 12. 开会功能边界（v0.3.2，已授权实现）
+
+基线 `44968f5`（M1 自动前移）。本节是 v0.3.2 的边界记录；实现只用配置期
+模块，不新增运行时状态源。
+
+### 12.1 四项能力与落层
+
+| 要素 | 落地形态 | 不做什么 |
+|---|---|---|
+| AtoA 顺序讨论 | `meeting.discuss()` 依次问 N 个角色；每个看「方案 + 前面意见摘要」给 `agree / reject` + 理由 | 不开线程会、不共享任务表、不进运行时 |
+| 一桌宠一个 provider | 用户层 `~/.config/desktop_pet/meeting.json`；角色按 `profile` / `chat` 覆盖取自己的接口；`key_env` 占位 | 不写进 manifest item；不动 schema；示例零模型 ID / host |
+| 全部同意放行 | 代码按 `agree` 计数；固定「反方」角色强制参与；全票只返回 `ready_for_human_review` | 不自动 `commit_changes()`；任一 `reject` / 超时 / 轮次到顶 → `conflict` |
+| 头顶 token 浮层 | `PetWindow.show_token_stats()`：TTFT + 前 5s 估算 + 全程累计，只显数字与「估算」 | 不改 `_render_rgba` / `self.base`；不打 URL / key / 原图名 |
+
+### 12.2 默认与硬停
+
+- `meeting.json` 缺失、`enabled != true`、角色少于 2 个 → `disabled`，
+  零网络、零写盘。
+- 每角色请求前自查 `base_url` / `model` / key；缺 key 在联网前失败。
+- `max_rounds` 上限 3、`timeout_ms` 上限 1 小时；任一 reject 立即
+  `conflict`，不会为了「再劝一次」继续请求。
+- 中间意见只在当前进程内存；人点确认后仍走
+  `annotation_draft.save_draft()` → `commit_changes()` 唯一写盘路径。
+
+### 12.3 token 口径
+
+- **TTFT**：该角色首个 chunk 到达时间。
+- **前 5s 估算**：请求开始 5 秒内已收 chunk 的本地估算累计。
+- **全程累计**：整场评审所有角色 chunk 的本地估算之和。
+- provider 不返回 usage 时按本地分词估算；OpenAI 兼容流通常在结束帧才给
+  usage，因此前 5s 不写「精确消耗」。对外统一称「估算」。
+
+### 12.4 断言清单（v0.3.2 test 覆盖）
+
+默认关零网络 · 缺 key 请求前失败 · 角色额外字段不进入意见列表 ·
+全 agree 只标 `ready_for_human_review` · 任一 reject 标 `conflict` ·
+超时在下次请求前硬停 · 反方角色必被问 · 每 SKU provider 只改请求副本 ·
+浮层只显数字与「估算」· 保护 7 项自 `44968f5` 零 diff · skip 仍 1 个模块 ·
+fake provider 端到端（不连真实 API / 权重）。

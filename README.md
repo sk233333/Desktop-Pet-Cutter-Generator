@@ -330,6 +330,11 @@ python3 desktop_pet/launch.py --cli  # 要原来的命令行多窗口流程
   `chat.key_file` 指定的文件在 POSIX 下必须是 0600。
 - 云办公默认关：右键「发送办公事件…」先检查 `cloud.enabled` / `consent` /
   https `base_url` / `key_env` 四项，未就绪只提示、不联网。
+- 多角色开会评审（v0.3.2，默认关）：复制
+  `desktop_pet/meeting.json.example` 到 `~/.config/desktop_pet/meeting.json`
+  并启用；角色顺序评审，全同意也只标「待人工确认」，任一反对 / 超时都标
+  冲突，不自动保存。头顶 token 浮层只显示 TTFT、前 5s 估算与全程累计，
+  并明确标注「估算」。
 - 词表在窗口启动时从 `expr_state.STATES` + `ActionBridge.registry` +
   逐 SKU `effects.enabled` 反推一次，**不含 `blink`**；`smile` 已接线并进词表；
   改配置需重启生效。

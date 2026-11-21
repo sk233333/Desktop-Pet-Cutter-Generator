@@ -2,6 +2,29 @@
 
 按时间倒序。只记会影响观感或数据格式的行为变更；内部重构不列。
 
+## v0.3.2（配置期多角色评审 / 开会）
+
+### 行为变更
+
+- 新增用户层 `~/.config/desktop_pet/meeting.json`（默认关）：配置至少两个
+  角色后，标注报告弹窗出现「多角色开会评审」；角色按顺序看「方案 + 前面
+  意见摘要」给 `agree / reject`，固定「反方」角色强制参与。
+- 全票 `agree` 只标 `ready_for_human_review`；保存仍由人点确认，走
+  `annotation_draft.save_draft()` 唯一写盘路径。任一 `reject` / 超时 /
+  轮次到顶 → `conflict`，不自动保存。
+- 每角色可绑自己的 `profile` / `chat` 覆盖，实现一桌宠一个 provider；
+  只改本次请求的内存副本，不翻转全局 `chat.enabled`，不写 manifest item。
+- 桌宠头顶新增 token 浮层：TTFT + 前 5s 估算 + 全程累计，只显数字与
+  「估算」，不露 URL / key / 原图名；不改 `_render_rgba` / `self.base`。
+- 示例 `desktop_pet/meeting.json.example` 默认关、零具体模型 ID / host、
+  `key_env` 留空。
+
+### 保护与依赖
+
+- 零新 Python 依赖；`meeting.py` Qt-free，`meeting_worker.py` 只是 QThread 壳。
+- 保护 7 项自 `44968f5` 零 diff；skip 仍 1 个模块。
+- 对外措辞：`fake provider 端到端（不连真实 API / 权重）`。
+
 ## v0.3.1（R3 工程增强 + 未接线补完）
 
 ### 行为变更
