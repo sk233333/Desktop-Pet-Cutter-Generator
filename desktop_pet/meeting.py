@@ -22,9 +22,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
+    from .model_router import TASK_KINDS
     from .secrets_store import resolve_key
     from .usage_meter import estimate_tokens
 except ImportError:  # 平铺 sys.path
+    from model_router import TASK_KINDS
     from secrets_store import resolve_key
     from usage_meter import estimate_tokens
 
@@ -90,10 +92,14 @@ def _normalize_role(raw, index: int, *, devil=False) -> dict | None:
         return None
     name = _as_text(raw.get("name")) or f"角色{index + 1}"
     chat = raw.get("chat") if isinstance(raw.get("chat"), dict) else {}
+    task = _as_text(raw.get("task")) or "chat"
+    if task not in TASK_KINDS:
+        task = "chat"
     return {
         "name": name[:40],
         "sku": _as_text(raw.get("sku"))[:80],
         "profile": _as_text(raw.get("profile"))[:80],
+        "task": task,
         "chat": dict(chat),
         "devil": bool(raw.get("devil") or devil),
     }
@@ -238,7 +244,8 @@ def make_ask(base_cfg, *, stream=None):
         chunks: list[str] = []
         for token in stream(cfg, sys_msg,
                             [{"role": "user", "content": prompt}],
-                            sku=str(role.get("sku") or "")):
+                            sku=str(role.get("sku") or ""),
+                            task=str(role.get("task") or "chat")):
             elapsed = time.monotonic() - started
             if not ttft_ms:
                 ttft_ms = max(1, int(elapsed * 1000))

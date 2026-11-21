@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import stat
 from pathlib import Path
@@ -63,3 +64,44 @@ def resolve_key(cfg) -> str:
     if env:
         return env
     return _keyring_key(chat, name) or _file_key(chat)
+
+
+def key_source(cfg) -> str:
+    """只返回当前生效来源：``env`` / ``keyring`` / ``file`` / ``none``。"""
+    chat = _chat(cfg)
+    name = key_env_name(cfg)
+    if os.environ.get(name, ""):
+        return "env"
+    if _keyring_key(chat, name):
+        return "keyring"
+    if _file_key(chat):
+        return "file"
+    return "none"
+
+
+def key_source_report(cfg) -> dict:
+    """给 UI 的来源检查：只回布尔与路径，不回 key 内容。"""
+    chat = _chat(cfg)
+    name = key_env_name(cfg)
+    env_set = bool(os.environ.get(name, ""))
+    keyring_enabled = chat.get("keyring") is True
+    keyring_available = importlib.util.find_spec("keyring") is not None
+    ring_key = _keyring_key(chat, name) if keyring_enabled else ""
+    file_key = _file_key(chat)
+    if env_set:
+        source = "env"
+    elif ring_key:
+        source = "keyring"
+    elif file_key:
+        source = "file"
+    else:
+        source = "none"
+    return {
+        "env_name": name,
+        "env_set": env_set,
+        "keyring_enabled": keyring_enabled,
+        "keyring_available": keyring_available,
+        "key_file": str(chat.get("key_file") or "").strip(),
+        "key_file_ok": bool(file_key),
+        "source": source,
+    }

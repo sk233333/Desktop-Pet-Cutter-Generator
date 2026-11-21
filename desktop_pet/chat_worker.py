@@ -18,13 +18,13 @@ try:
     from .chat_contract import (build_system_prompt, clamp, retry_attempts,
                                 safe_parse)
     from .chat_provider import stream_chat
-    from .usage_meter import meter_from_config
+    from .usage_meter import record_usage
 except ImportError:  # 直接以脚本 / 平铺 sys.path 运行时
     from agent_core import loop_config, parse_step_reply, run_loop
     from chat_contract import (build_system_prompt, clamp, retry_attempts,
                                safe_parse)
     from chat_provider import stream_chat
-    from usage_meter import meter_from_config
+    from usage_meter import record_usage
 
 
 class _Interrupted(Exception):
@@ -106,14 +106,12 @@ class ChatWorker(QThread):
 
     def _deliver(self, sys_msg: str, messages: list[dict], reply: dict):
         """唯一落点：先记类别用量（默认关），再 clamp 后发 done。"""
-        meter = meter_from_config(self.cfg)
-        if meter is not None:
-            text_in = sys_msg + "".join(
-                str(m.get("content") or "") for m in messages
-                if isinstance(m, dict))
-            meter.record("chat", text_in, str(reply.get("text") or ""))
-            for line in meter.lines():
-                print(f"[usage] {line}", file=sys.stderr)
+        text_in = sys_msg + "".join(
+            str(m.get("content") or "") for m in messages
+            if isinstance(m, dict))
+        for line in record_usage(self.cfg, "chat", text_in,
+                                 str(reply.get("text") or "")):
+            print(f"[usage] {line}", file=sys.stderr)
         self.done.emit(clamp(reply, self.allowed))
 
     def run(self):

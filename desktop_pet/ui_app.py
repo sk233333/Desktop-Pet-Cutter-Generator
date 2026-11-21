@@ -961,10 +961,10 @@ class _AnnotateWorker(QThread):
         self._instruction = instruction
 
     def run(self):
-        from ai_annotate import build_report
+        from ai_annotate import build_report, routed_config
         from ai_motion_contract import AIGenError, load_config
         try:
-            report = build_report(self._image, load_config(),
+            report = build_report(self._image, routed_config(load_config()),
                                   instruction=self._instruction)
         except AIGenError as exc:
             self.failed.emit(str(exc))

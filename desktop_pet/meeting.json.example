@@ -14,6 +14,7 @@
       "name": "动作",
       "sku": "",
       "profile": "openai_chat",
+      "task": "reasoning",
       "chat": {"base_url": "", "model": "", "key_env": ""}
     }
   ],

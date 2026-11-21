@@ -10,7 +10,7 @@ W3 选 2：模型只给眼眶 / 嘴 / 发缕 / 摆动分区的候选坐标，人
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import cv2
@@ -148,6 +148,29 @@ def parse_report(raw: str) -> AnnotationReport:
             sway[key] = region
     return AnnotationReport(eyes=eyes, mouth=mouth, hair=hair, sway=sway,
                             warnings=warnings)
+
+
+def routed_config(config: AIMotionConfig, agent_cfg=None,
+                  task: str = "vision") -> AIMotionConfig:
+    """按 ``routing.tasks.<task>.model`` 覆盖本次视觉模型；默认原样返回。
+
+    base_url / key 仍来自 ``ai_motion.json``，只换模型名；不新增 host、
+    不联网、不改全局配置。routing 关闭或该任务没写 model 时零变化。
+    """
+    if agent_cfg is None:
+        try:
+            from chat_contract import load_agent_config
+        except ImportError:  # pragma: no cover
+            from .chat_contract import load_agent_config
+        agent_cfg = load_agent_config()
+    try:
+        from model_router import task_model
+    except ImportError:  # pragma: no cover
+        from .model_router import task_model
+    model = task_model(agent_cfg, task)
+    if not model or model == config.model:
+        return config
+    return replace(config, model=model)
 
 
 def build_report(image_bytes: bytes, config: AIMotionConfig, *,

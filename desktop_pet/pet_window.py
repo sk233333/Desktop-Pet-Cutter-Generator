@@ -1499,6 +1499,59 @@ class PetWindow(QWidget):
                 self, "办公事件",
                 f"未投递：{result.get('reason') or 'unknown'}")
 
+    def _open_usage_panel(self):
+        """用量统计：只读类别累计；默认关时给开启提示。"""
+        try:
+            from .chat_contract import load_agent_config
+            from .usage_meter import ledger_enabled, ledger_lines
+        except ImportError:
+            from chat_contract import load_agent_config
+            from usage_meter import ledger_enabled, ledger_lines
+        cfg = load_agent_config()
+        lines = ledger_lines()
+        if not lines:
+            if ledger_enabled(cfg):
+                msg = "暂无用量记录；发起一轮对话后再看。"
+            else:
+                msg = ("用量记录默认关闭。\n"
+                       "在 agent.json 设 chat.usage_log=true 后，每轮对话只按"
+                       "类别累计。\n记录不含正文 / URL / key / 原图名。")
+            QMessageBox.information(self, "用量统计", msg)
+            return
+        QMessageBox.information(
+            self, "用量统计",
+            "\n".join(lines) + "\n\n只按类别估算，不含正文 / URL / key / 图名。")
+
+    def _open_key_sources(self):
+        """密钥来源检查：只显示来源与可用性，不显示 key 内容。"""
+        try:
+            from .chat_contract import load_agent_config
+            from .secrets_store import key_source_report
+        except ImportError:
+            from chat_contract import load_agent_config
+            from secrets_store import key_source_report
+        rep = key_source_report(load_agent_config())
+        names = {"env": "环境变量", "keyring": "系统钥匙串",
+                 "file": "0600 文件", "none": "未找到"}
+        if not rep["key_file"]:
+            file_state = "未配置"
+        elif rep["key_file_ok"]:
+            file_state = "可用"
+        else:
+            file_state = "路径不可用或权限不是 0600"
+        lines = [
+            f"环境变量 {rep['env_name']}："
+            f"{'已设置' if rep['env_set'] else '未设置'}",
+            f"系统钥匙串：{'已启用' if rep['keyring_enabled'] else '关闭'}"
+            f"（{'可用' if rep['keyring_available'] else '未安装'}）",
+            f"0600 文件：{file_state}",
+            f"当前来源：{names.get(rep['source'], '未找到')}",
+            "",
+            "优先级：环境变量 → 钥匙串 → 0600 文件；"
+            "本对话框不显示 key 内容。",
+        ]
+        QMessageBox.information(self, "密钥来源", "\n".join(lines))
+
     def _open_action_settings(self):
         """图形化配置动作：选程序、勾双击、保存后立即生效（不用重启）。"""
         from action_dialog import ActionDialog
@@ -1699,6 +1752,10 @@ class PetWindow(QWidget):
             act_chat.setEnabled(False)
         act_cloud = menu.addAction("发送办公事件…")
         act_cloud.setToolTip("云办公默认关；四项就绪才投递，只发类别与文本")
+        act_usage = menu.addAction("用量统计…（默认关）")
+        act_usage.setToolTip("只显示类别与估算 token；不含正文 / URL / key / 图名")
+        act_keys = menu.addAction("密钥来源…")
+        act_keys.setToolTip("只检查环境变量 / 钥匙串 / 0600 文件，不显示 key 内容")
         menu.addSeparator()
         act_pause = menu.addAction("继续动画" if self.paused else "暂停动画")
 
@@ -1764,6 +1821,10 @@ class PetWindow(QWidget):
             self._asr_prompt()
         elif act is not None and act == act_cloud:
             self._open_cloud_event()
+        elif act is not None and act == act_usage:
+            self._open_usage_panel()
+        elif act is not None and act == act_keys:
+            self._open_key_sources()
         elif act == act_pause:
             self.paused = not self.paused
             self.update()

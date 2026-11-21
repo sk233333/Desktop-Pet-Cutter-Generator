@@ -68,3 +68,15 @@ def resolve_route(cfg, task: str = "chat") -> dict:
     out["model"] = model or out["model"]
     out["routed"] = True
     return out
+
+
+def task_model(cfg, task: str) -> str:
+    """只返回该任务**显式**配置的 model；默认关 / 空值返回空串。
+
+    视觉这类独立配置源（``ai_motion.json``）只需要「换模型」，
+    不能因为只填了 provider 就把全局 ``chat.model`` 误当成视觉模型。
+    """
+    if not routing_enabled(cfg):
+        return ""
+    kind = task if task in TASK_KINDS else FALLBACK_TASK
+    return str(_task_entry(cfg, kind).get("model") or "").strip()
